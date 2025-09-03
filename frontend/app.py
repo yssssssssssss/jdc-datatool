@@ -493,6 +493,31 @@ def show_ai_insights_page():
             else:
                 with st.chat_message("assistant"):
                     st.write(message['content'])
+                    
+                    # 只在最新的AI回复中显示图表
+                    is_latest_ai_message = (i == len(st.session_state['chat_history']) - 1)
+                    if (is_latest_ai_message and 
+                        'current_chart' in st.session_state and 
+                        st.session_state['current_chart']):
+                        
+                        chart_data = st.session_state['current_chart']
+                        if chart_data.get('chart_base64'):
+                            st.markdown(f"**{chart_data.get('title', '数据可视化')}**")
+                            
+                            # 显示图表
+                            import base64
+                            chart_base64 = chart_data['chart_base64']
+                            # 去掉data:image/png;base64,前缀
+                            if chart_base64.startswith('data:image/png;base64,'):
+                                chart_base64 = chart_base64.replace('data:image/png;base64,', '')
+                            chart_bytes = base64.b64decode(chart_base64)
+                            st.image(chart_bytes, use_column_width=True)
+                            
+                            if chart_data.get('description'):
+                                st.caption(chart_data['description'])
+                            
+                            # 清除图表数据，避免重复显示
+                            st.session_state['current_chart'] = None
     
     # 预设问题
     st.subheader("🎯 快速提问")
@@ -549,20 +574,11 @@ def show_ai_insights_page():
         st.rerun()
 
 def generate_ai_insight(df, question):
-    """使用真实的大模型生成AI洞察回答"""
+    """通过后端API调用大模型生成AI洞察回答"""
     try:
-        # 导入LLM分析器
-        import sys
-        import os
-        sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'backend'))
-        from llm_analyzer import LLMAnalyzer
-        
-        # 初始化LLM分析器
-        llm_analyzer = LLMAnalyzer()
-        
         # 准备数据上下文
         data_context = {
-            'shape': df.shape,
+            'shape': list(df.shape),
             'columns': df.columns.tolist(),
             'dtypes': df.dtypes.astype(str).to_dict(),
             'missing_values': df.isnull().sum().to_dict(),
@@ -573,37 +589,79 @@ def generate_ai_insight(df, question):
         # 获取聊天历史
         chat_history = st.session_state.get('chat_history', [])
         
-        # 调用大模型进行对话
-        result = llm_analyzer.chat_with_data(
-            user_question=question,
-            data_context=data_context,
-            chat_history=chat_history
-        )
+        # 准备请求数据
+        request_data = {
+            'question': question,
+            'data_context': data_context,
+            'chat_history': chat_history
+        }
         
-        if result['success']:
-            ai_response = result['response']
+        # 调用后端AI API
+        backend_url = "http://localhost:7701/api/ai/chat"
+        response = requests.post(backend_url, json=request_data, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
             
-            # 保存聊天历史
-            if 'chat_history' not in st.session_state:
-                st.session_state.chat_history = []
-            
-            # 添加到聊天历史
-            st.session_state.chat_history.append({
-                'user': question,
-                'assistant': ai_response
-            })
-            
-            # 限制聊天历史长度（保留最近10轮对话）
-            if len(st.session_state.chat_history) > 10:
-                st.session_state.chat_history = st.session_state.chat_history[-10:]
-            
-            return ai_response
+            if result.get('success'):
+                ai_response = result['response']
+                visualization_config = result.get('visualization', {'needed': False})
+                
+                # 如果需要生成图表
+                if visualization_config.get('needed', False):
+                    chart_result = generate_chart_from_config(df, visualization_config)
+                    if chart_result:
+                        # 将图表信息添加到session state中，供显示使用
+                        if 'current_chart' not in st.session_state:
+                            st.session_state['current_chart'] = {}
+                        st.session_state['current_chart'] = chart_result
+                        
+                        # 在AI响应中添加图表说明
+                        chart_description = visualization_config.get('description', '已生成相关图表')
+                        ai_response += f"\n\n📊 {chart_description}"
+                
+                return ai_response
+            else:
+                # 如果API调用失败，返回错误信息
+                return f"🤖 **AI服务暂时不可用**\n\n{result.get('response', result.get('error', '未知错误'))}\n\n💡 **提示：** 请检查网络连接和API配置。"
         else:
-            # 如果API调用失败，返回错误信息
-            return f"🤖 **AI服务暂时不可用**\n\n{result['response']}\n\n💡 **提示：** 请检查网络连接和API配置。"
+            return f"🤖 **后端服务连接失败**\n\n状态码：{response.status_code}\n\n💡 **提示：** 请确保后端服务正在运行（端口7701）。"
         
+    except requests.exceptions.ConnectionError:
+        return f"🤖 **无法连接到后端服务**\n\n💡 **提示：** 请确保后端服务正在运行（http://localhost:7701）。"
+    except requests.exceptions.Timeout:
+        return f"🤖 **请求超时**\n\n💡 **提示：** AI分析需要一些时间，请稍后重试。"
     except Exception as e:
         return f"❌ AI分析过程中出现错误：{str(e)}\n\n请检查系统配置或稍后重试。"
+
+def generate_chart_from_config(df, visualization_config):
+    """根据可视化配置生成图表"""
+    try:
+        # 调用后端图表生成API
+        response = requests.post(
+            'http://localhost:7701/api/generate_chart',
+            json={
+                'data': df.to_dict('records'),
+                'visualization': visualization_config
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get('success'):
+                return {
+                    'chart_base64': result['chart_base64'],
+                    'chart_type': result['chart_type'],
+                    'title': result['title'],
+                    'description': result.get('description', '')
+                }
+        
+        return None
+        
+    except Exception as e:
+        st.error(f"图表生成失败: {str(e)}")
+        return None
 
 if __name__ == "__main__":
     main()

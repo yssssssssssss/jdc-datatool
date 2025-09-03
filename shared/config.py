@@ -23,7 +23,7 @@ class Config:
         self.API_CONFIG = {
             'openai_api_key': os.getenv('OPENAI_API_KEY', '35f54cc4-be7a-4414-808e-f5f9f0194d4f'),
             'openai_model': os.getenv('OPENAI_MODEL', 'gpt-4o-0806'),
-            'openai_base_url': os.getenv('OPENAI_BASE_URL', 'http://gpt-proxy.jd.com/v1/chat/completions'),
+            'openai_base_url': os.getenv('OPENAI_BASE_URL', 'http://gpt-proxy.jd.com/v1'),
             'max_tokens': int(os.getenv('MAX_TOKENS', '2000')),
             'temperature': float(os.getenv('TEMPERATURE', '0.7'))
         }
@@ -40,14 +40,14 @@ class Config:
         self.APP_CONFIG = {
             'debug': os.getenv('DEBUG', 'False').lower() == 'true',
             'host': os.getenv('HOST', '0.0.0.0'),
-            'port': int(os.getenv('PORT', '5000')),
+            'port': int(os.getenv('PORT', '7701')),
             'secret_key': os.getenv('SECRET_KEY', 'your-secret-key-here'),
             'cors_origins': os.getenv('CORS_ORIGINS', '*').split(',')
         }
         
         # Streamlit配置
         self.STREAMLIT_CONFIG = {
-            'port': int(os.getenv('STREAMLIT_PORT', '8501')),
+            'port': int(os.getenv('STREAMLIT_PORT', '7001')),
             'host': os.getenv('STREAMLIT_HOST', '0.0.0.0'),
             'theme': {
                 'primaryColor': '#1f77b4',
@@ -160,12 +160,12 @@ TEMPERATURE=0.7
 # 应用配置
 DEBUG=False
 HOST=0.0.0.0
-PORT=5000
+PORT=7701
 SECRET_KEY=your_secret_key_here
 CORS_ORIGINS=*
 
 # Streamlit配置
-STREAMLIT_PORT=8501
+STREAMLIT_PORT=7001
 STREAMLIT_HOST=0.0.0.0
 
 # 文件上传配置

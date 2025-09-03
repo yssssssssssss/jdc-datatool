@@ -107,8 +107,8 @@ streamlit run app.py
 ```
 
 7. **访问应用**
-- 前端界面：http://localhost:8501
-- 后端API：http://localhost:5000
+- 前端界面：http://localhost:7001
+- 后端API：http://localhost:7701
 
 ## 🔧 配置说明
 

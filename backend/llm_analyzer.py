@@ -11,10 +11,19 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class LLMAnalyzer:
-    def __init__(self, api_key=None, model="gpt-4o-0806"):
+    def __init__(self, api_key=None, model="gpt-4o-0806", base_url=None):
         self.api_key = api_key or os.getenv('OPENAI_API_KEY')
         self.model = model or os.getenv('OPENAI_MODEL', 'gpt-4o-0806')
-        self.client = OpenAI(api_key=self.api_key) if self.api_key else None
+        self.base_url = base_url or os.getenv('OPENAI_BASE_URL')
+        
+        # 初始化OpenAI客户端
+        if self.api_key:
+            if self.base_url:
+                self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            else:
+                self.client = OpenAI(api_key=self.api_key)
+        else:
+            self.client = None
         
         if not self.client:
             logging.warning("OpenAI API key not found. AI features will be disabled.")
@@ -40,15 +49,38 @@ class LLMAnalyzer:
 - 数据类型：{data_context.get('dtypes', {})}
 """
             
+            # 构建系统提示
+            system_prompt = f"""
+你是一个专业的数据分析师，擅长分析各种类型的数据并提供深入的洞察。
+
+当前数据信息：
+{context_info}
+
+请根据用户的问题，提供专业、准确的数据分析建议。
+
+重要：请以JSON格式返回响应，包含以下字段：
+{{
+  "analysis": "详细的文字分析内容",
+  "visualization": {{
+    "needed": true/false,
+    "chart_type": "histogram/scatter/line/bar/pie/heatmap/box",
+    "columns": ["需要用于可视化的列名"],
+    "title": "图表标题",
+    "description": "图表说明"
+  }}
+}}
+
+如果问题需要可视化展示（如分布分析、相关性分析、趋势分析等），请设置visualization.needed为true并提供相应配置。
+如果只需要文字分析，请设置visualization.needed为false。
+
+请用中文回答，语言要专业但易懂。
+"""
+            
             # 构建消息历史
             messages = [
                 {
                     "role": "system", 
-                    "content": f"""你是一个专业的数据分析师和AI助手。用户上传了一个数据集，你需要基于以下数据信息回答用户的问题：
-
-{context_info}
-
-请提供专业、准确、有洞察力的数据分析建议。回答要简洁明了，重点突出，使用中文回复。"""
+                    "content": system_prompt
                 }
             ]
             
@@ -74,15 +106,45 @@ class LLMAnalyzer:
                 max_tokens=int(os.getenv('OPENAI_MAX_TOKENS', 2000))
             )
             
-            return {
-                "success": True,
-                "response": response.choices[0].message.content,
-                "usage": {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens
+            ai_response = response.choices[0].message.content
+            
+            # 尝试解析JSON响应
+            try:
+                # 清理响应文本，移除可能的markdown代码块标记
+                clean_response = ai_response.strip()
+                if clean_response.startswith('```json'):
+                    clean_response = clean_response[7:]
+                if clean_response.endswith('```'):
+                    clean_response = clean_response[:-3]
+                clean_response = clean_response.strip()
+                
+                parsed_response = json.loads(clean_response)
+                
+                return {
+                    "success": True,
+                    "response": parsed_response.get('analysis', ai_response),
+                    "visualization": parsed_response.get('visualization', {'needed': False}),
+                    "usage": {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens
+                    },
+                    "structured": True
                 }
-            }
+            except json.JSONDecodeError:
+                # 如果解析失败，返回原始文本响应
+                return {
+                    "success": True,
+                    "response": ai_response,
+                    "visualization": {'needed': False},
+                    "usage": {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens
+                    },
+                    "structured": False
+                }
+            
             
         except Exception as e:
             logging.error(f"AI对话失败: {e}")
