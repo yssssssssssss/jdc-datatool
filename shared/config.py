@@ -50,10 +50,10 @@ class Config:
             'port': int(os.getenv('STREAMLIT_PORT', '7001')),
             'host': os.getenv('STREAMLIT_HOST', '0.0.0.0'),
             'theme': {
-                'primaryColor': '#1f77b4',
+                'primaryColor': '#6c757d',
                 'backgroundColor': '#ffffff',
-                'secondaryBackgroundColor': '#f0f2f6',
-                'textColor': '#262730'
+                'secondaryBackgroundColor': '#f8f9fa',
+                'textColor': '#212529'
             }
         }
         

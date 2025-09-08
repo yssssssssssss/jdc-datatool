@@ -1,4 +1,6 @@
 # 可视化生成逻辑
+import matplotlib
+matplotlib.use('Agg')  # 使用非交互式后端，避免线程问题
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
@@ -19,7 +21,7 @@ class VisualizationGenerator:
     def generate_histogram(self, data: pd.Series, title: str = "直方图") -> str:
         """生成直方图"""
         fig, ax = plt.subplots(figsize=(10, 6))
-        ax.hist(data.dropna(), bins=30, alpha=0.7, color='skyblue', edgecolor='black')
+        ax.hist(data.dropna(), bins=30, alpha=0.7, color='#6c757d', edgecolor='black')
         ax.set_title(title, fontsize=14, fontweight='bold')
         ax.set_xlabel('数值', fontsize=12)
         ax.set_ylabel('频次', fontsize=12)
@@ -31,7 +33,7 @@ class VisualizationGenerator:
                             title: str = "散点图") -> str:
         """生成散点图"""
         fig, ax = plt.subplots(figsize=(10, 6))
-        ax.scatter(x_data, y_data, alpha=0.6, color='coral')
+        ax.scatter(x_data, y_data, alpha=0.6, color='#495057')
         ax.set_title(title, fontsize=14, fontweight='bold')
         ax.set_xlabel(x_data.name or 'X轴', fontsize=12)
         ax.set_ylabel(y_data.name or 'Y轴', fontsize=12)
@@ -43,7 +45,7 @@ class VisualizationGenerator:
                           title: str = "折线图") -> str:
         """生成折线图"""
         fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(data[x_col], data[y_col], marker='o', linewidth=2, markersize=4)
+        ax.plot(data[x_col], data[y_col], marker='o', linewidth=2, markersize=4, color='#495057')
         ax.set_title(title, fontsize=14, fontweight='bold')
         ax.set_xlabel(x_col, fontsize=12)
         ax.set_ylabel(y_col, fontsize=12)
@@ -56,7 +58,7 @@ class VisualizationGenerator:
     def generate_bar_chart(self, data: pd.Series, title: str = "柱状图") -> str:
         """生成柱状图"""
         fig, ax = plt.subplots(figsize=(10, 6))
-        data.plot(kind='bar', ax=ax, color='lightgreen', alpha=0.8)
+        data.plot(kind='bar', ax=ax, color='#6c757d', alpha=0.8)
         ax.set_title(title, fontsize=14, fontweight='bold')
         ax.set_xlabel('类别', fontsize=12)
         ax.set_ylabel('数值', fontsize=12)
@@ -69,7 +71,9 @@ class VisualizationGenerator:
     def generate_pie_chart(self, data: pd.Series, title: str = "饼图") -> str:
         """生成饼图"""
         fig, ax = plt.subplots(figsize=(8, 8))
-        colors = plt.cm.Set3(np.linspace(0, 1, len(data)))
+        # 使用黑白灰色调
+        colors = ['#2c2c2c', '#495057', '#6c757d', '#adb5bd', '#dee2e6', '#f8f9fa'] * (len(data) // 6 + 1)
+        colors = colors[:len(data)]
         wedges, texts, autotexts = ax.pie(data.values, labels=data.index, 
                                          autopct='%1.1f%%', colors=colors,
                                          startangle=90)
@@ -80,7 +84,7 @@ class VisualizationGenerator:
     def generate_heatmap(self, data: pd.DataFrame, title: str = "热力图") -> str:
         """生成热力图"""
         fig, ax = plt.subplots(figsize=(10, 8))
-        sns.heatmap(data.corr(), annot=True, cmap='coolwarm', center=0,
+        sns.heatmap(data.corr(), annot=True, cmap='gray', center=0,
                    square=True, ax=ax, cbar_kws={'shrink': 0.8})
         ax.set_title(title, fontsize=14, fontweight='bold')
         plt.tight_layout()
@@ -91,7 +95,11 @@ class VisualizationGenerator:
                          title: str = "箱线图") -> str:
         """生成箱线图"""
         fig, ax = plt.subplots(figsize=(8, 6))
-        data.boxplot(column=column, ax=ax)
+        bp = data.boxplot(column=column, ax=ax, patch_artist=True)
+        # 设置箱线图颜色为黑白灰
+        for patch in ax.findobj(plt.matplotlib.patches.PathPatch):
+            patch.set_facecolor('#6c757d')
+            patch.set_edgecolor('#2c2c2c')
         ax.set_title(title, fontsize=14, fontweight='bold')
         ax.set_ylabel('数值', fontsize=12)
         ax.grid(True, alpha=0.3)
@@ -102,18 +110,25 @@ class VisualizationGenerator:
                                 x_col: str, y_col: str = None) -> Dict:
         """生成交互式图表"""
         try:
+            # 定义黑白灰色调
+            color_discrete_sequence = ['#2c2c2c', '#495057', '#6c757d', '#adb5bd']
+            
             if chart_type == 'scatter':
                 fig = px.scatter(data, x=x_col, y=y_col, 
-                               title=f'{x_col} vs {y_col} 散点图')
+                               title=f'{x_col} vs {y_col} 散点图',
+                               color_discrete_sequence=color_discrete_sequence)
             elif chart_type == 'line':
                 fig = px.line(data, x=x_col, y=y_col,
-                            title=f'{x_col} vs {y_col} 折线图')
+                            title=f'{x_col} vs {y_col} 折线图',
+                            color_discrete_sequence=color_discrete_sequence)
             elif chart_type == 'bar':
                 fig = px.bar(data, x=x_col, y=y_col,
-                           title=f'{x_col} 柱状图')
+                           title=f'{x_col} 柱状图',
+                           color_discrete_sequence=color_discrete_sequence)
             elif chart_type == 'histogram':
                 fig = px.histogram(data, x=x_col,
-                                 title=f'{x_col} 直方图')
+                                 title=f'{x_col} 直方图',
+                                 color_discrete_sequence=color_discrete_sequence)
             else:
                 return {"error": "不支持的图表类型"}
             

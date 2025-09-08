@@ -1,6 +1,7 @@
 # Streamlit 前端应用入口
 import streamlit as st
 import pandas as pd
+import numpy as np
 import requests
 import json
 from io import StringIO
@@ -22,17 +23,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 自定义CSS样式
+# 自定义CSS样式 - 黑白灰配色方案
 st.markdown("""
 <style>
 .main-header {
     font-size: 2.5rem;
-    color: #1f77b4;
+    color: #2c2c2c;
     text-align: center;
     margin-bottom: 2rem;
     padding: 1rem;
-    background: linear-gradient(90deg, #f0f8ff, #e6f3ff);
+    background: linear-gradient(90deg, #f8f9fa, #e9ecef);
     border-radius: 10px;
+    border: 1px solid #dee2e6;
 }
 .metric-card {
     background: white;
@@ -40,13 +42,15 @@ st.markdown("""
     border-radius: 10px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     margin: 0.5rem 0;
+    border: 1px solid #e9ecef;
 }
 .upload-section {
-    border: 2px dashed #1f77b4;
+    border: 2px dashed #6c757d;
     border-radius: 10px;
     padding: 2rem;
     text-align: center;
     margin: 1rem 0;
+    background-color: #f8f9fa;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -453,7 +457,11 @@ def show_report_page():
                 st.exception(e)
 
 def show_ai_insights_page():
-    st.header("🤖 AI洞察")
+    # 初始化可视化组件选择器状态
+    if 'selected_chart_type' not in st.session_state:
+        st.session_state['selected_chart_type'] = 'auto'
+    if 'viz_components' not in st.session_state:
+        st.session_state['viz_components'] = get_available_viz_components()
     
     if 'dataframe' not in st.session_state:
         st.warning("⚠️ 请先上传数据文件")
@@ -465,91 +473,312 @@ def show_ai_insights_page():
     if 'chat_history' not in st.session_state:
         st.session_state['chat_history'] = []
     
-    # 数据概览
-    st.subheader("📊 数据概览")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("数据行数", f"{df.shape[0]:,}")
-    with col2:
-        st.metric("数据列数", df.shape[1])
-    with col3:
-        numeric_cols = len(df.select_dtypes(include=['number']).columns)
-        st.metric("数值列数", numeric_cols)
-    with col4:
-        missing_pct = (df.isnull().sum().sum() / (len(df) * len(df.columns))) * 100
-        st.metric("缺失值比例", f"{missing_pct:.1f}%")
+    # 侧边栏：可视化组件选择器
+    with st.sidebar:
+        st.markdown("### 🎨 可视化设置")
+        
+        # 图表类型选择
+        chart_types = {
+            'auto': '🤖 智能推荐',
+            'line': '📈 折线图',
+            'bar': '📊 柱状图',
+            'scatter': '🔵 散点图',
+            'histogram': '📊 直方图',
+            'box': '📦 箱线图',
+            'heatmap': '🔥 热力图',
+            'pie': '🥧 饼图'
+        }
+        
+        st.session_state['selected_chart_type'] = st.selectbox(
+            "默认图表类型",
+            options=list(chart_types.keys()),
+            format_func=lambda x: chart_types[x],
+            index=0
+        )
+        
+        # 智能图表推荐
+        st.markdown("### 🤖 智能推荐")
+        
+        if st.button("获取图表推荐", use_container_width=True):
+            with st.spinner("正在分析数据特征..."):
+                recommendations = get_chart_recommendations(df)
+                if recommendations:
+                    st.session_state['chart_recommendations'] = recommendations
+                    st.success("已获取图表推荐！")
+                else:
+                    st.error("获取推荐失败")
+        
+        # 显示推荐结果
+        if 'chart_recommendations' in st.session_state:
+            st.markdown("**推荐图表:**")
+            for rec in st.session_state['chart_recommendations'][:3]:  # 显示前3个推荐
+                priority_color = {
+                    'high': '🔴',
+                    'medium': '🟡', 
+                    'low': '🟢'
+                }.get(rec.get('priority', 'medium'), '🟡')
+                
+                if st.button(
+                    f"{priority_color} {rec['icon']} {rec['name']}",
+                    key=f"rec_{rec['chart_type']}",
+                    help=rec['description'],
+                    use_container_width=True
+                ):
+                    st.session_state['selected_chart_type'] = rec['chart_type']
+                    st.success(f"已选择: {rec['name']}")
+                    st.rerun()
+         
+        # 可视化组件管理
+        st.markdown("### ⚙️ 组件管理")
+        
+        # 组件分类显示
+        component_categories = {}
+        for component in st.session_state['viz_components']:
+            category = component.get('category', 'other')
+            if category not in component_categories:
+                component_categories[category] = []
+            component_categories[category].append(component)
+        
+        # 显示组件分类
+        category_names = {
+            'ai': '🤖 AI智能',
+            'trend': '📈 趋势分析',
+            'comparison': '📊 对比分析',
+            'correlation': '🔗 关联分析',
+            'distribution': '📊 分布分析',
+            'proportion': '🥧 比例分析',
+            'multivariate': '🎯 多元分析',
+            'summary': '📋 汇总展示',
+            'raw_data': '📊 原始数据',
+            'custom': '🎨 自定义',
+            'other': '📁 其他'
+        }
+        
+        for category, components in component_categories.items():
+            with st.expander(f"{category_names.get(category, category)} ({len(components)})"):
+                for component in components:
+                    col1, col2, col3 = st.columns([2, 2, 1])
+                    with col1:
+                        st.text(f"{component['icon']} {component['name']}")
+                    with col2:
+                        st.caption(component.get('description', '无描述'))
+                    with col3:
+                        if component.get('custom', False):
+                            if st.button("🗑️", key=f"del_{component['id']}", help="删除组件"):
+                                if remove_viz_component(component['id']):
+                                    st.rerun()
+        
+        # 添加新组件
+        with st.expander("➕ 添加自定义组件"):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_component_name = st.text_input("组件名称")
+                new_component_type = st.selectbox("组件类型", ['chart', 'table', 'metric', 'widget'])
+                new_component_category = st.selectbox("组件分类", list(category_names.keys()))
+            
+            with col2:
+                new_component_icon = st.text_input("图标 (emoji)", "🎨")
+                new_component_description = st.text_input("描述")
+                new_component_persistent = st.checkbox("持久化保存", value=True)
+            
+            new_component_config = st.text_area(
+                "配置 (JSON格式)", 
+                '{"color": "blue", "style": "modern"}',
+                help="组件的配置参数，必须是有效的JSON格式"
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("添加组件", type="primary", use_container_width=True):
+                    if new_component_name:
+                        if add_custom_viz_component(
+                            new_component_name, 
+                            new_component_type, 
+                            new_component_config,
+                            new_component_category,
+                            new_component_description,
+                            new_component_icon,
+                            new_component_persistent
+                        ):
+                            st.success(f"已添加组件: {new_component_name}")
+                            st.rerun()
+                    else:
+                        st.error("请输入组件名称")
+            
+            with col2:
+                if st.button("重置表单", use_container_width=True):
+                    st.rerun()
+        
+        # 组件导入导出
+        with st.expander("📦 组件导入导出"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**导出组件**")
+                if st.button("导出所有自定义组件", use_container_width=True):
+                    export_data = export_custom_components()
+                    if export_data:
+                        st.download_button(
+                            label="下载组件配置文件",
+                            data=export_data,
+                            file_name=f"viz_components_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.json",
+                            mime="application/json",
+                            use_container_width=True
+                        )
+            
+            with col2:
+                st.markdown("**导入组件**")
+                uploaded_config = st.file_uploader(
+                    "选择组件配置文件",
+                    type=['json'],
+                    help="上传之前导出的组件配置文件"
+                )
+                
+                if uploaded_config is not None:
+                    if st.button("导入组件", use_container_width=True):
+                        if import_custom_components(uploaded_config):
+                            st.success("组件导入成功！")
+                            st.rerun()
+                        else:
+                            st.error("组件导入失败")
     
     # AI对话界面
-    st.subheader("💬 与AI对话")
     
-    # 显示聊天历史
+    # 显示聊天历史 - 自适应高度
     chat_container = st.container()
     with chat_container:
-        for i, message in enumerate(st.session_state['chat_history']):
-            if message['role'] == 'user':
-                with st.chat_message("user"):
-                    st.write(message['content'])
-            else:
-                with st.chat_message("assistant"):
-                    st.write(message['content'])
-                    
-                    # 只在最新的AI回复中显示图表
-                    is_latest_ai_message = (i == len(st.session_state['chat_history']) - 1)
-                    if (is_latest_ai_message and 
-                        'current_chart' in st.session_state and 
-                        st.session_state['current_chart']):
+            for i, message in enumerate(st.session_state['chat_history']):
+                if message['role'] == 'user':
+                    with st.chat_message("user"):
+                        st.write(message['content'])
+                else:
+                    with st.chat_message("assistant"):
+                        st.write(message['content'])
                         
-                        chart_data = st.session_state['current_chart']
-                        if chart_data.get('chart_base64'):
-                            st.markdown(f"**{chart_data.get('title', '数据可视化')}**")
-                            
-                            # 显示图表
-                            import base64
-                            chart_base64 = chart_data['chart_base64']
-                            # 去掉data:image/png;base64,前缀
-                            if chart_base64.startswith('data:image/png;base64,'):
-                                chart_base64 = chart_base64.replace('data:image/png;base64,', '')
-                            chart_bytes = base64.b64decode(chart_base64)
-                            st.image(chart_bytes, use_column_width=True)
-                            
-                            if chart_data.get('description'):
-                                st.caption(chart_data['description'])
-                            
-                            # 清除图表数据，避免重复显示
-                            st.session_state['current_chart'] = None
+                        # 如果消息包含图表数据，显示图表
+                        if 'chart' in message and message['chart']:
+                            chart_data = message['chart']
+                            if chart_data.get('chart_base64'):
+                                st.markdown(f"**{chart_data.get('title', '数据可视化')}**")
+                                
+                                # 显示图表
+                                import base64
+                                chart_base64 = chart_data['chart_base64']
+                                # 去掉data:image/png;base64,前缀
+                                if chart_base64.startswith('data:image/png;base64,'):
+                                    chart_base64 = chart_base64.replace('data:image/png;base64,', '')
+                                chart_bytes = base64.b64decode(chart_base64)
+                                st.image(chart_bytes, use_column_width=True)
+                                
+                                if chart_data.get('description'):
+                                    st.caption(chart_data['description'])
     
-    # 预设问题
-    st.subheader("🎯 快速提问")
-    quick_questions = [
-        "分析这个数据集的主要特征",
-        "找出数据中的异常值",
-        "推荐适合的可视化方法",
-        "数据质量如何？有什么问题？",
-        "哪些变量之间可能存在相关性？"
-    ]
+    # 数据概览卡片
+    st.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #495057 0%, #343a40 100%);
+        padding: 20px;
+        border-radius: 15px;
+        color: white;
+        margin: 30px 0;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+    ">
+        <h3 style="margin: 0 0 15px 0; font-size: 1.2em;">📊 数据概览</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px;">
+            <div style="text-align: center;">
+                <div style="font-size: 1.8em; font-weight: bold;">{}</div>
+                <div style="font-size: 0.9em; opacity: 0.9;">总行数</div>
+            </div>
+            <div style="text-align: center;">
+                <div style="font-size: 1.8em; font-weight: bold;">{}</div>
+                <div style="font-size: 0.9em; opacity: 0.9;">总列数</div>
+            </div>
+            <div style="text-align: center;">
+                <div style="font-size: 1.8em; font-weight: bold;">{}</div>
+                <div style="font-size: 0.9em; opacity: 0.9;">数值列</div>
+            </div>
+            <div style="text-align: center;">
+                <div style="font-size: 1.8em; font-weight: bold;">{:.1f}%</div>
+                <div style="font-size: 0.9em; opacity: 0.9;">缺失值</div>
+            </div>
+        </div>
+    </div>
+    """.format(
+        len(df),
+        len(df.columns),
+        len(df.select_dtypes(include=[np.number]).columns),
+        (df.isnull().sum().sum() / (len(df) * len(df.columns))) * 100
+    ), unsafe_allow_html=True)
     
-    cols = st.columns(len(quick_questions))
-    for i, question in enumerate(quick_questions):
-        with cols[i]:
-            if st.button(question, key=f"quick_q_{i}"):
-                # 添加用户问题到聊天历史
-                st.session_state['chat_history'].append({
-                    'role': 'user',
-                    'content': question
-                })
-                
-                # 生成AI回答
-                ai_response = generate_ai_insight(df, question)
-                st.session_state['chat_history'].append({
-                    'role': 'assistant',
-                    'content': ai_response
-                })
-                
-                st.rerun()
+    # Grok风格的预设问题布局
+    st.markdown("### 🎯 智能提问")
     
-    # 用户输入
-    user_input = st.chat_input("请输入您的问题...")
+    # 预设问题分类
+    question_categories = {
+        "🔍 数据探索": [
+            "分析这个数据集的主要特征",
+            "数据质量如何？有什么问题？",
+            "找出数据中的异常值"
+        ],
+        "📊 可视化建议": [
+            "推荐适合的可视化方法",
+            "创建数据分布图表",
+            "生成相关性热力图"
+        ],
+        "🔗 关系分析": [
+            "哪些变量之间可能存在相关性？",
+            "识别数据中的模式和趋势",
+            "分析变量间的因果关系"
+        ]
+    }
+    
+    # 使用标签页显示不同类别的问题
+    tabs = st.tabs(list(question_categories.keys()))
+    
+    for tab, (category, questions) in zip(tabs, question_categories.items()):
+        with tab:
+            # 使用网格布局显示问题按钮
+            cols = st.columns(2)
+            for i, question in enumerate(questions):
+                with cols[i % 2]:
+                    if st.button(question, key=f"quick_q_{category}_{i}", use_container_width=True):
+                        # 添加用户问题到聊天历史
+                        st.session_state['chat_history'].append({
+                            'role': 'user',
+                            'content': question
+                        })
+                        
+                        # 生成AI回答
+                        ai_response = generate_ai_insight(df, question)
+                        
+                        # 处理AI响应（可能包含图表数据）
+                        if isinstance(ai_response, dict) and 'chart' in ai_response:
+                            # 如果响应包含图表数据，分别保存文本和图表
+                            st.session_state['chat_history'].append({
+                                'role': 'assistant',
+                                'content': ai_response['text'],
+                                'chart': ai_response['chart']
+                            })
+                        else:
+                            # 普通文本响应
+                            st.session_state['chat_history'].append({
+                                'role': 'assistant',
+                                'content': ai_response
+                            })
+                        
+                        st.rerun()
+    
+    # 用户输入区域
+    st.markdown("---")
+    col1, col2 = st.columns([4, 1])
+    
+    with col1:
+        user_input = st.chat_input("💭 请输入您的问题...")
+    
+    with col2:
+        if st.button("🗑️ 清除历史", use_container_width=True):
+            st.session_state['chat_history'] = []
+            st.rerun()
     
     if user_input:
         # 添加用户消息
@@ -559,18 +788,24 @@ def show_ai_insights_page():
         })
         
         # 生成AI回答
-        with st.spinner("AI正在分析中..."):
+        with st.spinner("🤖 AI正在分析中..."):
             ai_response = generate_ai_insight(df, user_input)
-            st.session_state['chat_history'].append({
-                'role': 'assistant',
-                'content': ai_response
-            })
+            
+            # 处理AI响应（可能包含图表数据）
+            if isinstance(ai_response, dict) and 'chart' in ai_response:
+                # 如果响应包含图表数据，分别保存文本和图表
+                st.session_state['chat_history'].append({
+                    'role': 'assistant',
+                    'content': ai_response['text'],
+                    'chart': ai_response['chart']
+                })
+            else:
+                # 普通文本响应
+                st.session_state['chat_history'].append({
+                    'role': 'assistant',
+                    'content': ai_response
+                })
         
-        st.rerun()
-    
-    # 清除聊天历史
-    if st.button("🗑️ 清除对话历史"):
-        st.session_state['chat_history'] = []
         st.rerun()
 
 def generate_ai_insight(df, question):
@@ -611,14 +846,15 @@ def generate_ai_insight(df, question):
                 if visualization_config.get('needed', False):
                     chart_result = generate_chart_from_config(df, visualization_config)
                     if chart_result:
-                        # 将图表信息添加到session state中，供显示使用
-                        if 'current_chart' not in st.session_state:
-                            st.session_state['current_chart'] = {}
-                        st.session_state['current_chart'] = chart_result
-                        
                         # 在AI响应中添加图表说明
                         chart_description = visualization_config.get('description', '已生成相关图表')
                         ai_response += f"\n\n📊 {chart_description}"
+                        
+                        # 将图表数据保存到AI响应中，以便在聊天历史中持久显示
+                        return {
+                            'text': ai_response,
+                            'chart': chart_result
+                        }
                 
                 return ai_response
             else:
@@ -634,9 +870,273 @@ def generate_ai_insight(df, question):
     except Exception as e:
         return f"❌ AI分析过程中出现错误：{str(e)}\n\n请检查系统配置或稍后重试。"
 
+def get_available_viz_components():
+    """获取可用的可视化组件列表"""
+    default_components = [
+        {
+            'id': 'smart_recommend',
+            'name': '智能推荐',
+            'icon': '🤖',
+            'type': 'chart',
+            'category': 'ai',
+            'description': 'AI智能推荐最适合的图表类型',
+            'config': {'auto_select': True, 'priority': 'high'},
+            'persistent': False
+        },
+        {
+            'id': 'line_chart',
+            'name': '折线图',
+            'icon': '📈',
+            'type': 'chart',
+            'category': 'trend',
+            'description': '显示数据随时间的变化趋势',
+            'config': {'chart_type': 'line', 'color': 'blue', 'line_width': 2, 'show_markers': True},
+            'persistent': True
+        },
+        {
+            'id': 'bar_chart',
+            'name': '柱状图',
+            'icon': '📊',
+            'type': 'chart',
+            'category': 'comparison',
+            'description': '比较不同类别的数值大小',
+            'config': {'chart_type': 'bar', 'color': 'green', 'orientation': 'vertical', 'show_values': True},
+            'persistent': True
+        },
+        {
+            'id': 'scatter_plot',
+            'name': '散点图',
+            'icon': '🔵',
+            'type': 'chart',
+            'category': 'correlation',
+            'description': '显示两个变量之间的关系',
+            'config': {'chart_type': 'scatter', 'color': 'red', 'size': 8, 'show_trend': True, 'alpha': 0.7},
+            'persistent': True
+        },
+        {
+            'id': 'pie_chart',
+            'name': '饼图',
+            'icon': '🥧',
+            'type': 'chart',
+            'category': 'proportion',
+            'description': '显示各部分占整体的比例',
+            'config': {'chart_type': 'pie', 'show_percentage': True, 'explode_max': True, 'color_palette': 'Set3'},
+            'persistent': True
+        },
+        {
+            'id': 'heatmap',
+            'name': '热力图',
+            'icon': '🔥',
+            'type': 'chart',
+            'category': 'correlation',
+            'description': '显示数据的密度分布或相关性',
+            'config': {'chart_type': 'heatmap', 'colormap': 'viridis', 'show_values': True, 'center': 0},
+            'persistent': True
+        },
+        {
+            'id': 'histogram',
+            'name': '直方图',
+            'icon': '📊',
+            'type': 'chart',
+            'category': 'distribution',
+            'description': '显示数据的分布情况',
+            'config': {'chart_type': 'histogram', 'bins': 30, 'density': False, 'alpha': 0.8},
+            'persistent': True
+        },
+        {
+            'id': 'box_plot',
+            'name': '箱线图',
+            'icon': '📦',
+            'type': 'chart',
+            'category': 'distribution',
+            'description': '显示数据的分布和异常值',
+            'config': {'chart_type': 'box', 'show_outliers': True, 'notch': False, 'color': 'lightblue'},
+            'persistent': True
+        },
+        {
+            'id': 'violin_plot',
+            'name': '小提琴图',
+            'icon': '🎻',
+            'type': 'chart',
+            'category': 'distribution',
+            'description': '结合箱线图和密度图的优势',
+            'config': {'chart_type': 'violin', 'show_density': True, 'inner': 'box', 'palette': 'muted'},
+            'persistent': True
+        },
+        {
+            'id': 'area_chart',
+            'name': '面积图',
+            'icon': '🏔️',
+            'type': 'chart',
+            'category': 'trend',
+            'description': '强调数量随时间的累积变化',
+            'config': {'chart_type': 'area', 'fill_alpha': 0.7, 'stacked': False, 'color': 'skyblue'},
+            'persistent': True
+        },
+        {
+            'id': 'radar_chart',
+            'name': '雷达图',
+            'icon': '🎯',
+            'type': 'chart',
+            'category': 'multivariate',
+            'description': '多维数据的综合展示',
+            'config': {'chart_type': 'radar', 'fill_area': True, 'line_width': 2, 'alpha': 0.25},
+            'persistent': True
+        },
+        {
+            'id': 'metric_card',
+            'name': '指标卡片',
+            'icon': '📋',
+            'type': 'metric',
+            'category': 'summary',
+            'description': '显示关键指标和KPI',
+            'config': {'show_delta': True, 'color_coding': True, 'format': 'auto'},
+            'persistent': True
+        },
+        {
+            'id': 'data_table',
+            'name': '数据表格',
+            'icon': '📊',
+            'type': 'table',
+            'category': 'raw_data',
+            'description': '以表格形式展示原始数据',
+            'config': {'pagination': True, 'sortable': True, 'searchable': True, 'max_rows': 100},
+            'persistent': True
+        }
+    ]
+    
+    # 从持久化存储加载自定义组件
+    custom_components = load_custom_components()
+    
+    # 从session state获取临时组件
+    temp_components = st.session_state.get('temp_viz_components', [])
+    
+    return default_components + custom_components + temp_components
+
+def add_custom_viz_component(name, component_type, config_str, category='custom', description='', icon='🎨', persistent=True):
+    """添加自定义可视化组件"""
+    try:
+        import json
+        import uuid
+        from datetime import datetime
+        
+        config = json.loads(config_str)
+        
+        # 生成唯一ID
+        component_id = f"custom_{uuid.uuid4().hex[:8]}_{name.lower().replace(' ', '_').replace('-', '_')}"
+        
+        new_component = {
+            'id': component_id,
+            'name': name,
+            'icon': icon,
+            'type': component_type,
+            'category': category,
+            'description': description,
+            'config': config,
+            'custom': True,
+            'persistent': persistent,
+            'created_at': datetime.now().isoformat(),
+            'version': '1.0'
+        }
+        
+        if persistent:
+            # 保存到持久化存储
+            save_custom_component(new_component)
+        else:
+            # 保存到临时session state
+            if 'temp_viz_components' not in st.session_state:
+                st.session_state['temp_viz_components'] = []
+            st.session_state['temp_viz_components'].append(new_component)
+        
+        # 更新可视化组件列表
+        st.session_state['viz_components'] = get_available_viz_components()
+        
+        return True
+        
+    except json.JSONDecodeError:
+        st.error("配置格式错误，请输入有效的JSON格式")
+        return False
+    except Exception as e:
+        st.error(f"添加组件失败: {str(e)}")
+        return False
+
+def remove_viz_component(component_id):
+    """删除可视化组件"""
+    try:
+        # 从持久化存储删除
+        if delete_custom_component(component_id):
+            st.success(f"已删除组件: {component_id}")
+        
+        # 从临时组件删除
+        if 'temp_viz_components' in st.session_state:
+            st.session_state['temp_viz_components'] = [
+                comp for comp in st.session_state['temp_viz_components']
+                if comp['id'] != component_id
+            ]
+        
+        # 更新可视化组件列表
+        st.session_state['viz_components'] = get_available_viz_components()
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"删除组件失败: {str(e)}")
+        return False
+
+def get_chart_recommendations(df):
+    """获取图表推荐"""
+    try:
+        import numpy as np
+        
+        # 构建数据上下文
+        numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
+        categorical_columns = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        
+        data_context = {
+            'total_rows': len(df),
+            'total_columns': len(df.columns),
+            'numeric_columns': numeric_columns,
+            'categorical_columns': categorical_columns,
+            'column_info': {
+                col: {
+                    'type': str(df[col].dtype),
+                    'unique_values': df[col].nunique(),
+                    'null_count': df[col].isnull().sum()
+                } for col in df.columns
+            }
+        }
+        
+        # 调用后端推荐API
+        response = requests.post(
+            'http://localhost:7701/api/chart/recommendations',
+            json={
+                'data_context': data_context,
+                'analysis_goal': 'general_exploration'
+            },
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            return response.json().get('recommendations', [])
+        else:
+            st.error(f"推荐API调用失败: {response.status_code}")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"网络请求失败: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"获取推荐时出错: {str(e)}")
+        return None
+
 def generate_chart_from_config(df, visualization_config):
     """根据可视化配置生成图表"""
     try:
+        # 如果用户选择了特定的图表类型，覆盖AI推荐
+        if (st.session_state.get('selected_chart_type') and 
+            st.session_state['selected_chart_type'] != 'auto'):
+            visualization_config['chart_type'] = st.session_state['selected_chart_type']
+        
         # 调用后端图表生成API
         response = requests.post(
             'http://localhost:7701/api/generate_chart',
@@ -662,6 +1162,161 @@ def generate_chart_from_config(df, visualization_config):
     except Exception as e:
         st.error(f"图表生成失败: {str(e)}")
         return None
+
+def load_custom_components():
+    """从持久化存储加载自定义组件"""
+    try:
+        import os
+        import json
+        
+        config_dir = os.path.expanduser("~/.jdc_data_tool")
+        config_file = os.path.join(config_dir, "custom_components.json")
+        
+        if os.path.exists(config_file):
+            with open(config_file, 'r', encoding='utf-8') as f:
+                components_data = json.load(f)
+                return components_data.get('components', [])
+        
+        return []
+        
+    except Exception as e:
+        st.error(f"加载自定义组件失败: {str(e)}")
+        return []
+
+def save_custom_component(component):
+    """保存自定义组件到持久化存储"""
+    try:
+        import os
+        import json
+        
+        config_dir = os.path.expanduser("~/.jdc_data_tool")
+        os.makedirs(config_dir, exist_ok=True)
+        config_file = os.path.join(config_dir, "custom_components.json")
+        
+        # 加载现有组件
+        components = load_custom_components()
+        
+        # 检查是否已存在同ID组件
+        existing_index = None
+        for i, comp in enumerate(components):
+            if comp['id'] == component['id']:
+                existing_index = i
+                break
+        
+        if existing_index is not None:
+            components[existing_index] = component
+        else:
+            components.append(component)
+        
+        # 保存到文件
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump({
+                'components': components,
+                'last_updated': pd.Timestamp.now().isoformat()
+            }, f, ensure_ascii=False, indent=2)
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"保存组件失败: {str(e)}")
+        return False
+
+def delete_custom_component(component_id):
+    """从持久化存储删除自定义组件"""
+    try:
+        import os
+        import json
+        
+        config_dir = os.path.expanduser("~/.jdc_data_tool")
+        config_file = os.path.join(config_dir, "custom_components.json")
+        
+        if not os.path.exists(config_file):
+            return False
+        
+        # 加载现有组件
+        components = load_custom_components()
+        
+        # 过滤掉要删除的组件
+        original_count = len(components)
+        components = [comp for comp in components if comp['id'] != component_id]
+        
+        if len(components) == original_count:
+            return False  # 没有找到要删除的组件
+        
+        # 保存更新后的组件列表
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump({
+                'components': components,
+                'last_updated': pd.Timestamp.now().isoformat()
+            }, f, ensure_ascii=False, indent=2)
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"删除组件失败: {str(e)}")
+        return False
+
+def export_custom_components():
+    """导出所有自定义组件"""
+    try:
+        import json
+        
+        components = load_custom_components()
+        
+        export_data = {
+            'version': '1.0',
+            'export_time': pd.Timestamp.now().isoformat(),
+            'components': components,
+            'metadata': {
+                'total_components': len(components),
+                'export_source': 'JDC Data Analysis Tool'
+            }
+        }
+        
+        return json.dumps(export_data, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        st.error(f"导出组件失败: {str(e)}")
+        return None
+
+def import_custom_components(uploaded_file):
+    """导入自定义组件"""
+    try:
+        import json
+        
+        # 读取上传的文件
+        content = uploaded_file.read().decode('utf-8')
+        import_data = json.loads(content)
+        
+        # 验证文件格式
+        if 'components' not in import_data:
+            st.error("无效的组件配置文件格式")
+            return False
+        
+        imported_components = import_data['components']
+        
+        # 逐个导入组件
+        success_count = 0
+        for component in imported_components:
+            # 为导入的组件生成新的ID以避免冲突
+            import uuid
+            original_id = component['id']
+            component['id'] = f"imported_{uuid.uuid4().hex[:8]}_{original_id}"
+            component['imported'] = True
+            component['import_time'] = pd.Timestamp.now().isoformat()
+            
+            if save_custom_component(component):
+                success_count += 1
+        
+        st.success(f"成功导入 {success_count}/{len(imported_components)} 个组件")
+        return True
+        
+    except json.JSONDecodeError:
+        st.error("文件格式错误，请确保是有效的JSON文件")
+        return False
+    except Exception as e:
+        st.error(f"导入组件失败: {str(e)}")
+        return False
 
 if __name__ == "__main__":
     main()

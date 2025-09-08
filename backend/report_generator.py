@@ -169,7 +169,7 @@ class ReportGenerator:
         }
         .header {
             text-align: center;
-            border-bottom: 3px solid #007bff;
+            border-bottom: 3px solid #6c757d;
             padding-bottom: 20px;
             margin-bottom: 30px;
         }
@@ -180,8 +180,8 @@ class ReportGenerator:
             border-radius: 5px;
         }
         .section h2 {
-            color: #007bff;
-            border-bottom: 2px solid #007bff;
+            color: #495057;
+            border-bottom: 2px solid #6c757d;
             padding-bottom: 10px;
         }
         .stats-grid {
@@ -194,7 +194,7 @@ class ReportGenerator:
             background: #f8f9fa;
             padding: 15px;
             border-radius: 5px;
-            border-left: 4px solid #007bff;
+            border-left: 4px solid #6c757d;
         }
         .chart-container {
             text-align: center;
@@ -207,15 +207,15 @@ class ReportGenerator:
             border-radius: 5px;
         }
         .recommendations {
-            background: #e7f3ff;
+            background: #f8f9fa;
             padding: 20px;
             border-radius: 5px;
-            border-left: 4px solid #007bff;
+            border-left: 4px solid #6c757d;
         }
         .quality-score {
             font-size: 2em;
             font-weight: bold;
-            color: {% if quality_assessment.overall_score >= 80 %}#28a745{% elif quality_assessment.overall_score >= 60 %}#ffc107{% else %}#dc3545{% endif %};
+            color: {% if quality_assessment.overall_score >= 80 %}#2c2c2c{% elif quality_assessment.overall_score >= 60 %}#495057{% else %}#6c757d{% endif %};
         }
     </style>
 </head>
@@ -288,7 +288,7 @@ class ReportGenerator:
             {% endfor %}
             </ul>
             {% else %}
-            <p style="color: #28a745;">未发现明显的数据质量问题</p>
+            <p style="color: #2c2c2c;">未发现明显的数据质量问题</p>
             {% endif %}
         </div>
     </div>
