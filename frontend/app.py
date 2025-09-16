@@ -1,5 +1,20 @@
 # Streamlit 前端应用入口
 import streamlit as st
+
+# 缓存破坏机制 - 强制刷新
+import time
+import hashlib
+
+# 生成唯一的缓存破坏标识
+CACHE_BUSTER = hashlib.md5(str(time.time()).encode()).hexdigest()[:8]
+
+# 在页面标题中添加缓存破坏标识
+if "cache_buster" not in st.session_state:
+    st.session_state.cache_buster = CACHE_BUSTER
+    # 强制重新加载页面配置
+    st.rerun()
+
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import requests
@@ -14,6 +29,9 @@ import os
 
 # 添加项目根目录到路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# 后端API配置
+BACKEND_URL = "http://localhost:5000"
 
 # 页面配置
 st.set_page_config(
@@ -59,15 +77,68 @@ def main():
     # 主标题
     st.markdown('<div class="main-header">📊 JDC数据分析工具</div>', unsafe_allow_html=True)
     
-    # 侧边栏
+    # 顶部导航栏
+    st.markdown("""
+    <style>
+    .nav-bar {
+        background: linear-gradient(90deg, #f8f9fa, #e9ecef);
+        padding: 1rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        border: 1px solid #dee2e6;
+    }
+    .nav-button {
+        display: inline-block;
+        padding: 0.5rem 1rem;
+        margin: 0 0.25rem;
+        background: white;
+        border: 1px solid #6c757d;
+        border-radius: 5px;
+        text-decoration: none;
+        color: #2c2c2c;
+        font-weight: 500;
+        transition: all 0.3s ease;
+    }
+    .nav-button:hover {
+        background: #e9ecef;
+        border-color: #495057;
+    }
+    .nav-button.active {
+        background: #2c2c2c;
+        color: white;
+        border-color: #2c2c2c;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # 导航栏选项
+    nav_options = {
+        "📁 数据上传": "数据上传",
+        "👀 数据预览": "数据预览", 
+        "📊 数据分析": "数据分析",
+        "📈 可视化生成": "可视化生成",
+        "📋 报告生成": "报告生成",
+        "🤖 AI洞察": "AI洞察",
+        "⚙️ 组件管理": "组件管理"
+    }
+    
+    # 使用session state保存当前页面
+    if 'current_page' not in st.session_state:
+        st.session_state['current_page'] = "数据上传"
+    
+    # 创建导航栏
+    cols = st.columns(len(nav_options))
+    for i, (display_name, page_name) in enumerate(nav_options.items()):
+        with cols[i]:
+            if st.button(display_name, key=f"nav_{page_name}", use_container_width=True):
+                st.session_state['current_page'] = page_name
+                st.rerun()
+    
+    # 显示当前选中的页面
+    st.markdown("---")
+    
+    # 侧边栏保留使用说明
     with st.sidebar:
-        st.header("🔧 功能菜单")
-        page = st.selectbox(
-            "选择功能",
-            ["数据上传", "数据预览", "数据分析", "可视化生成", "报告生成", "AI洞察"]
-        )
-        
-        st.markdown("---")
         st.markdown("### 📋 使用说明")
         st.markdown("""
         1. **数据上传**: 上传CSV或Excel文件
@@ -76,9 +147,11 @@ def main():
         4. **可视化生成**: 创建各种图表
         5. **报告生成**: 生成分析报告
         6. **AI洞察**: 获取智能分析建议
+        7. **组件管理**: 管理自定义可视化组件
         """)
     
     # 主内容区域
+    page = st.session_state['current_page']
     if page == "数据上传":
         show_upload_page()
     elif page == "数据预览":
@@ -91,6 +164,8 @@ def main():
         show_report_page()
     elif page == "AI洞察":
         show_ai_insights_page()
+    elif page == "组件管理":
+        show_component_management_page()
 
 def show_upload_page():
     st.header("📁 数据上传")
@@ -271,7 +346,7 @@ def show_analysis_page():
             st.warning("没有数值列可供异常值检测")
 
 def show_visualization_page():
-    st.header("📈 可视化生成")
+    st.header("📈 多库可视化生成")
     
     if 'dataframe' not in st.session_state:
         st.warning("⚠️ 请先上传数据文件")
@@ -279,33 +354,422 @@ def show_visualization_page():
     
     df = st.session_state['dataframe']
     
-    # 图表类型选择
-    chart_type = st.selectbox(
-        "选择图表类型",
-        ["直方图", "散点图", "折线图", "柱状图", "箱线图", "相关性热力图"]
-    )
+    # 创建标签页
+    tab1, tab2, tab3 = st.tabs(["📊 单库模式", "⚖️ 对比模式", "📈 性能监控"])
     
-    if chart_type == "直方图":
-        numeric_cols = df.select_dtypes(include=['number']).columns
-        if len(numeric_cols) > 0:
-            selected_col = st.selectbox("选择列", numeric_cols)
-            fig = px.histogram(df, x=selected_col, title=f"{selected_col} 分布直方图")
-            st.plotly_chart(fig, use_container_width=True)
+    with tab1:
+        show_single_library_mode(df)
     
-    elif chart_type == "散点图":
-        numeric_cols = df.select_dtypes(include=['number']).columns
-        if len(numeric_cols) >= 2:
-            col1, col2 = st.columns(2)
-            with col1:
-                x_col = st.selectbox("X轴", numeric_cols)
-            with col2:
-                y_col = st.selectbox("Y轴", numeric_cols)
+    with tab2:
+        show_comparison_mode(df)
+    
+    with tab3:
+        show_performance_monitoring()
+
+def show_single_library_mode(df):
+    """单库可视化模式"""
+    st.subheader("单库可视化生成")
+    
+    # 获取可用适配器
+    try:
+        response = requests.get(f"{BACKEND_URL}/api/multi_lib/adapters")
+        if response.status_code == 200:
+            response_data = response.json()
+            # 处理嵌套的adapters结构
+            if 'adapters' in response_data and 'adapters' in response_data['adapters']:
+                adapters = list(response_data['adapters']['adapters'].values())
+            else:
+                adapters = response_data.get('adapters', [])
+        else:
+            st.error("无法获取可用适配器")
+            return
+    except Exception as e:
+        st.error(f"连接后端失败: {str(e)}")
+        return
+    
+    # 库选择和配置
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        # 选择可视化库
+        selected_adapter = st.selectbox(
+            "选择可视化库",
+            options=[adapter['name'] for adapter in adapters],
+            format_func=lambda x: f"{x} ({'ECharts' if x == 'echarts' else 'Bokeh' if x == 'bokeh' else x})"
+        )
+        
+        # 获取支持的图表类型
+        try:
+            response = requests.get(f"{BACKEND_URL}/api/multi_lib/chart_types", 
+                                  params={'adapter': selected_adapter})
+            if response.status_code == 200:
+                chart_types = response.json()['chart_types']
+            else:
+                chart_types = ["line", "bar", "scatter", "pie", "histogram"]
+        except:
+            chart_types = ["line", "bar", "scatter", "pie", "histogram"]
+        
+        # 图表类型选择
+        chart_type_mapping = {
+            "line": "折线图",
+            "bar": "柱状图", 
+            "scatter": "散点图",
+            "pie": "饼图",
+            "histogram": "直方图",
+            "heatmap": "热力图",
+            "box": "箱线图"
+        }
+        
+        chart_type = st.selectbox(
+            "选择图表类型",
+            options=chart_types,
+            format_func=lambda x: chart_type_mapping.get(x, x)
+        )
+    
+    with col2:
+        # 数据列选择
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        
+        if chart_type in ['line', 'bar', 'scatter']:
+            col_x, col_y = st.columns(2)
+            with col_x:
+                x_column = st.selectbox("X轴", numeric_cols + categorical_cols)
+            with col_y:
+                y_column = st.selectbox("Y轴", numeric_cols)
+        elif chart_type == 'histogram':
+            x_column = st.selectbox("选择列", numeric_cols)
+            y_column = None
+        elif chart_type == 'pie':
+            x_column = st.selectbox("分类列", categorical_cols)
+            y_column = st.selectbox("数值列", numeric_cols) if len(numeric_cols) > 0 else None
+        elif chart_type == 'heatmap':
+            if len(numeric_cols) >= 2:
+                selected_cols = st.multiselect("选择数值列", numeric_cols, default=numeric_cols[:5])
+                x_column = selected_cols
+                y_column = None
+            else:
+                st.warning("热力图需要至少2个数值列")
+                return
+        elif chart_type == 'box':
+            x_column = st.selectbox("分组列", categorical_cols) if categorical_cols else None
+            y_column = st.selectbox("数值列", numeric_cols)
+    
+    # 生成图表按钮
+    if st.button("🚀 生成图表", type="primary"):
+        generate_single_chart(df, selected_adapter, chart_type, x_column, y_column)
+
+def generate_single_chart(df, adapter, chart_type, x_column, y_column):
+    """生成单个图表"""
+    with st.spinner(f"正在使用 {adapter} 生成图表..."):
+        try:
+            # 准备数据
+            chart_data = prepare_chart_data(df, chart_type, x_column, y_column)
             
-            fig = px.scatter(df, x=x_col, y=y_col, title=f"{x_col} vs {y_col}")
-            st.plotly_chart(fig, use_container_width=True)
+            # 调用后端API生成图表
+            payload = {
+                'adapter': adapter,
+                'chart_type': chart_type,
+                'data': chart_data,
+                'config': {
+                    'title': f"{chart_type.title()} Chart",
+                    'width': 800,
+                    'height': 600
+                }
+            }
+            
+            response = requests.post(f"{BACKEND_URL}/api/multi_lib/generate_chart", json=payload)
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                # 显示图表
+                display_chart(result, adapter, height=600)
+                
+                # 显示性能指标
+                if 'performance' in result:
+                    perf = result['performance']
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("渲染时间", f"{perf['render_time']:.3f}s")
+                    with col2:
+                        st.metric("文件大小", f"{perf['file_size']:.2f}KB")
+                    with col3:
+                        st.metric("内存使用", f"{perf['memory_usage']:.2f}MB")
+                
+            else:
+                st.error(f"图表生成失败: {response.text}")
+                
+        except Exception as e:
+            st.error(f"生成图表时出错: {str(e)}")
+
+def show_comparison_mode(df):
+    """对比模式界面"""
+    st.subheader("多库对比模式")
     
-    # 其他图表类型的实现...
-    st.info("更多图表类型正在开发中...")
+    # 获取可用适配器
+    try:
+        response = requests.get(f"{BACKEND_URL}/api/multi_lib/adapters")
+        if response.status_code == 200:
+            response_data = response.json()
+            # 处理嵌套的adapters结构
+            if 'adapters' in response_data and 'adapters' in response_data['adapters']:
+                adapters = list(response_data['adapters']['adapters'].values())
+            else:
+                adapters = response_data.get('adapters', [])
+        else:
+            st.error("无法获取可用适配器")
+            return
+    except Exception as e:
+        st.error(f"连接后端失败: {str(e)}")
+        return
+    
+    # 选择要对比的库
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        selected_adapters = st.multiselect(
+            "选择要对比的可视化库",
+            options=[adapter['name'] for adapter in adapters],
+            default=[adapters[0]['name'], adapters[1]['name']] if len(adapters) >= 2 else [adapters[0]['name']],
+            format_func=lambda x: f"{x} ({'ECharts' if x == 'echarts' else 'Bokeh' if x == 'bokeh' else x})"
+        )
+    
+    with col2:
+        # 图表类型选择（取交集）
+        common_chart_types = ['line', 'bar', 'scatter', 'pie', 'histogram']
+        chart_type_mapping = {
+            "line": "折线图",
+            "bar": "柱状图", 
+            "scatter": "散点图",
+            "pie": "饼图",
+            "histogram": "直方图"
+        }
+        
+        chart_type = st.selectbox(
+            "选择图表类型",
+            options=common_chart_types,
+            format_func=lambda x: chart_type_mapping.get(x, x)
+        )
+    
+    # 数据列选择
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    
+    if chart_type in ['line', 'bar', 'scatter']:
+        col_x, col_y = st.columns(2)
+        with col_x:
+            x_column = st.selectbox("X轴", numeric_cols + categorical_cols, key="comp_x")
+        with col_y:
+            y_column = st.selectbox("Y轴", numeric_cols, key="comp_y")
+    elif chart_type == 'histogram':
+        x_column = st.selectbox("选择列", numeric_cols, key="comp_hist")
+        y_column = None
+    elif chart_type == 'pie':
+        x_column = st.selectbox("分类列", categorical_cols, key="comp_pie_x")
+        y_column = st.selectbox("数值列", numeric_cols, key="comp_pie_y") if len(numeric_cols) > 0 else None
+    
+    # 生成对比图表
+    if st.button("🔄 生成对比图表", type="primary") and len(selected_adapters) >= 2:
+        generate_comparison_charts(df, selected_adapters, chart_type, x_column, y_column)
+    elif len(selected_adapters) < 2:
+        st.warning("请至少选择两个可视化库进行对比")
+
+def generate_comparison_charts(df, adapters, chart_type, x_column, y_column):
+    """生成对比图表"""
+    with st.spinner("正在生成对比图表..."):
+        try:
+            # 准备数据
+            chart_data = prepare_chart_data(df, chart_type, x_column, y_column)
+            
+            # 调用后端对比API
+            payload = {
+                'adapters': adapters,
+                'chart_type': chart_type,
+                'data': chart_data,
+                'config': {
+                    'title': f"{chart_type.title()} Comparison",
+                    'width': 800,
+                    'height': 600
+                }
+            }
+            
+            response = requests.post(f"{BACKEND_URL}/api/multi_lib/compare", json=payload)
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                # 并排显示图表
+                cols = st.columns(len(adapters))
+                
+                for i, adapter in enumerate(adapters):
+                    with cols[i]:
+                        st.subheader(f"{adapter.title()} 渲染结果")
+                        
+                        if adapter in result['charts']:
+                            # 使用统一的图表显示函数
+                            display_chart(result['charts'][adapter], adapter, height=500)
+                            
+                            # 显示性能指标
+                            if 'performance' in result['charts'][adapter]:
+                                perf = result['charts'][adapter]['performance']
+                                st.metric("渲染时间", f"{perf['render_time']:.3f}s")
+                                st.metric("文件大小", f"{perf['file_size']:.2f}KB")
+                        else:
+                            st.error(f"{adapter} 渲染失败")
+                
+                # 显示对比总结
+                if 'comparison_summary' in result:
+                    st.subheader("📊 性能对比总结")
+                    summary_df = pd.DataFrame(result['comparison_summary'])
+                    st.dataframe(summary_df, use_container_width=True)
+                    
+                    # 推荐最佳库
+                    if 'recommended_adapter' in result:
+                        st.success(f"🏆 推荐使用: {result['recommended_adapter']} (综合性能最佳)")
+                
+            else:
+                st.error(f"对比生成失败: {response.text}")
+                
+        except Exception as e:
+            st.error(f"生成对比图表时出错: {str(e)}")
+
+def show_performance_monitoring():
+    """性能监控界面"""
+    st.subheader("📈 性能监控面板")
+    
+    try:
+        # 获取性能指标
+        response = requests.get(f"{BACKEND_URL}/api/multi_lib/performance")
+        
+        if response.status_code == 200:
+            perf_data = response.json()
+            
+            # 显示总体性能指标
+            st.subheader("📊 总体性能指标")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("总图表数", perf_data.get('total_charts', 0))
+            with col2:
+                st.metric("平均渲染时间", f"{perf_data.get('avg_render_time', 0):.3f}s")
+            with col3:
+                st.metric("平均文件大小", f"{perf_data.get('avg_file_size', 0):.2f}KB")
+            with col4:
+                st.metric("平均内存使用", f"{perf_data.get('avg_memory_usage', 0):.2f}MB")
+            
+            # 各库性能对比
+            if 'adapter_performance' in perf_data:
+                st.subheader("🔍 各库性能详情")
+                
+                adapter_df = pd.DataFrame(perf_data['adapter_performance'])
+                if not adapter_df.empty:
+                    # 性能对比图表
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        fig_time = px.bar(adapter_df, x='adapter', y='avg_render_time',
+                                        title="平均渲染时间对比")
+                        st.plotly_chart(fig_time, use_container_width=True)
+                    
+                    with col2:
+                        fig_size = px.bar(adapter_df, x='adapter', y='avg_file_size',
+                                        title="平均文件大小对比")
+                        st.plotly_chart(fig_size, use_container_width=True)
+                    
+                    # 详细数据表
+                    st.dataframe(adapter_df, use_container_width=True)
+            
+            # 实时性能监控
+            st.subheader("⚡ 实时性能监控")
+            
+            if st.button("🔄 刷新性能数据"):
+                st.rerun()
+            
+            # 性能趋势图（如果有历史数据）
+            if 'performance_history' in perf_data:
+                history_df = pd.DataFrame(perf_data['performance_history'])
+                if not history_df.empty:
+                    fig_trend = px.line(history_df, x='timestamp', y='render_time',
+                                      color='adapter', title="渲染时间趋势")
+                    st.plotly_chart(fig_trend, use_container_width=True)
+        
+        else:
+            st.error("无法获取性能数据")
+            
+    except Exception as e:
+        st.error(f"获取性能数据失败: {str(e)}")
+
+def display_chart(result, adapter, height=600):
+    """统一显示图表的辅助函数"""
+    try:
+        if 'chart_html' in result:
+            # 使用HTML组件渲染图表
+            components.html(result['chart_html'], height=height)
+        elif 'chart_data' in result:
+            # 如果返回的是图表数据，使用Plotly显示
+            import plotly.graph_objects as go
+            fig = go.Figure(result['chart_data'])
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.error(f"无法显示 {adapter} 图表：缺少图表数据")
+    except Exception as e:
+        st.error(f"显示 {adapter} 图表时出错: {str(e)}")
+
+def prepare_chart_data(df, chart_type, x_column, y_column):
+    """准备图表数据"""
+    if chart_type == 'histogram':
+        return {
+            'x': df[x_column].tolist(),
+            'chart_type': chart_type
+        }
+    elif chart_type == 'pie':
+        if y_column:
+            # 按分类聚合数值
+            grouped = df.groupby(x_column)[y_column].sum().reset_index()
+            return {
+                'labels': grouped[x_column].tolist(),
+                'values': grouped[y_column].tolist(),
+                'chart_type': chart_type
+            }
+        else:
+            # 计算分类频次
+            value_counts = df[x_column].value_counts()
+            return {
+                'labels': value_counts.index.tolist(),
+                'values': value_counts.values.tolist(),
+                'chart_type': chart_type
+            }
+    elif chart_type == 'heatmap':
+        # 相关性矩阵
+        corr_matrix = df[x_column].corr()
+        return {
+            'z': corr_matrix.values.tolist(),
+            'x': corr_matrix.columns.tolist(),
+            'y': corr_matrix.index.tolist(),
+            'chart_type': chart_type
+        }
+    elif chart_type == 'box':
+        if x_column:
+            # 分组箱线图
+            groups = df.groupby(x_column)[y_column].apply(list).to_dict()
+            return {
+                'groups': groups,
+                'chart_type': chart_type
+            }
+        else:
+            # 单个箱线图
+            return {
+                'y': df[y_column].tolist(),
+                'chart_type': chart_type
+            }
+    else:
+        # 标准 x-y 图表
+        return {
+            'x': df[x_column].tolist(),
+            'y': df[y_column].tolist() if y_column else None,
+            'chart_type': chart_type
+        }
 
 def show_report_page():
     st.header("📄 报告生成")
@@ -456,6 +920,150 @@ def show_report_page():
                 st.error(f"报告生成失败: {str(e)}")
                 st.exception(e)
 
+def show_component_management_page():
+    """组件管理页面"""
+    st.header("⚙️ 组件管理")
+    
+    # 初始化组件状态
+    if 'viz_components' not in st.session_state:
+        st.session_state['viz_components'] = get_available_viz_components()
+    
+    # 页面布局
+    tab1, tab2, tab3 = st.tabs(["📋 组件列表", "➕ 添加组件", "📖 使用说明"])
+    
+    with tab1:
+        st.subheader("当前可用组件")
+        
+        # 组件分类显示
+        component_categories = {}
+        for component in st.session_state['viz_components']:
+            category = component.get('category', 'other')
+            if category not in component_categories:
+                component_categories[category] = []
+            component_categories[category].append(component)
+        
+        # 显示组件分类
+        category_names = {
+            'ai': '🤖 AI智能',
+            'trend': '📈 趋势分析',
+            'comparison': '📊 对比分析',
+            'correlation': '🔗 关联分析',
+            'distribution': '📊 分布分析',
+            'proportion': '🥧 比例分析',
+            'multivariate': '🎯 多元分析',
+            'summary': '📋 汇总展示',
+            'raw_data': '📊 原始数据',
+            'custom': '🎨 自定义',
+            'other': '📁 其他'
+        }
+        
+        for category, components in component_categories.items():
+            with st.expander(f"{category_names.get(category, category)} ({len(components)})", expanded=True):
+                for component in components:
+                    col1, col2, col3, col4 = st.columns([1, 2, 3, 1])
+                    with col1:
+                        st.text(component['icon'])
+                    with col2:
+                        st.text(component['name'])
+                    with col3:
+                        st.caption(component.get('description', '无描述'))
+                    with col4:
+                        if component.get('custom', False):
+                            if st.button("🗑️", key=f"del_{component['id']}", help="删除组件"):
+                                if remove_viz_component(component['id']):
+                                    st.success(f"已删除组件: {component['name']}")
+                                    st.rerun()
+    
+    with tab2:
+        st.subheader("添加自定义组件")
+        
+        with st.form("add_component_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_component_name = st.text_input("组件名称*", placeholder="例如: 自定义散点图")
+                new_component_type = st.selectbox("组件类型*", ['chart', 'table', 'metric', 'widget'])
+                new_component_category = st.selectbox("组件分类*", list(category_names.keys()))
+            
+            with col2:
+                new_component_icon = st.text_input("图标 (emoji)*", "🎨", placeholder="例如: 📊")
+                new_component_description = st.text_input("描述", placeholder="组件功能描述")
+                new_component_persistent = st.checkbox("持久化保存", value=True)
+            
+            new_component_config = st.text_area(
+                "配置 (JSON格式)*", 
+                '{"color": "blue", "style": "modern"}',
+                help="组件的配置参数，必须是有效的JSON格式",
+                height=100
+            )
+            
+            submitted = st.form_submit_button("添加组件", type="primary", use_container_width=True)
+            
+            if submitted:
+                if new_component_name and new_component_config:
+                    try:
+                        # 验证JSON格式
+                        json.loads(new_component_config)
+                        
+                        if add_custom_viz_component(
+                            new_component_name, 
+                            new_component_type, 
+                            new_component_config,
+                            new_component_category,
+                            new_component_description,
+                            new_component_icon,
+                            new_component_persistent
+                        ):
+                            st.success(f"✅ 成功添加组件: {new_component_name}")
+                            st.rerun()
+                        else:
+                            st.error("❌ 添加组件失败")
+                    except json.JSONDecodeError:
+                        st.error("❌ 配置格式错误，请输入有效的JSON格式")
+                else:
+                    st.error("❌ 请填写必填字段（标记*的字段）")
+    
+    with tab3:
+        st.subheader("使用说明")
+        
+        st.markdown("""
+        ### 📖 组件管理说明
+        
+        #### 什么是可视化组件？
+        可视化组件是预定义的图表配置模板，可以快速应用到数据分析中。每个组件包含：
+        - **名称和图标**: 便于识别的显示信息
+        - **类型**: chart(图表)、table(表格)、metric(指标)、widget(小部件)
+        - **分类**: 按功能分组，如趋势分析、对比分析等
+        - **配置**: JSON格式的参数设置
+        
+        #### 如何添加自定义组件？
+        1. 在"添加组件"标签页填写组件信息
+        2. 配置参数使用JSON格式，例如:
+        ```json
+        {
+            "chart_type": "line",
+            "color": "#2c2c2c",
+            "show_legend": true,
+            "animation": false
+        }
+        ```
+        3. 点击"添加组件"按钮保存
+        
+        #### 如何使用自定义组件？
+        1. 在"AI洞察"页面的侧边栏中找到"组件管理"区域
+        2. 选择需要的组件分类
+        3. 点击组件名称即可应用到当前分析中
+        
+        #### 组件分类说明
+        - **🤖 AI智能**: AI推荐和智能分析组件
+        - **📈 趋势分析**: 时间序列、趋势变化相关图表
+        - **📊 对比分析**: 柱状图、条形图等比较类图表
+        - **🔗 关联分析**: 散点图、相关性分析图表
+        - **📊 分布分析**: 直方图、密度图等分布类图表
+        - **🥧 比例分析**: 饼图、环形图等比例类图表
+        - **🎯 多元分析**: 多维度、复合型图表
+        - **🎨 自定义**: 用户自定义的组件
+        """)
+
 def show_ai_insights_page():
     # 初始化可视化组件选择器状态
     if 'selected_chart_type' not in st.session_state:
@@ -493,7 +1101,8 @@ def show_ai_insights_page():
             "默认图表类型",
             options=list(chart_types.keys()),
             format_func=lambda x: chart_types[x],
-            index=0
+            index=0,
+            help="选择AI分析时默认使用的图表类型。选择'智能推荐'时，AI会根据数据特征自动选择最合适的图表类型。"
         )
         
         # 智能图表推荐
@@ -528,10 +1137,10 @@ def show_ai_insights_page():
                     st.success(f"已选择: {rec['name']}")
                     st.rerun()
          
-        # 可视化组件管理
-        st.markdown("### ⚙️ 组件管理")
+        # 快速组件选择
+        st.markdown("### ⚙️ 快速组件")
         
-        # 组件分类显示
+        # 组件分类显示（简化版）
         component_categories = {}
         for component in st.session_state['viz_components']:
             category = component.get('category', 'other')
@@ -658,7 +1267,8 @@ def show_ai_insights_page():
                         # 如果消息包含图表数据，显示图表
                         if 'chart' in message and message['chart']:
                             chart_data = message['chart']
-                            if chart_data.get('chart_base64'):
+                            # 检查chart_data是否为字典类型
+                            if isinstance(chart_data, dict) and chart_data.get('chart_base64'):
                                 st.markdown(f"**{chart_data.get('title', '数据可视化')}**")
                                 
                                 # 显示图表
@@ -672,6 +1282,12 @@ def show_ai_insights_page():
                                 
                                 if chart_data.get('description'):
                                     st.caption(chart_data['description'])
+                            elif isinstance(chart_data, str):
+                                # 如果chart_data是字符串，显示为文本
+                                st.info(f"图表数据: {chart_data}")
+                            else:
+                                # 其他类型，显示调试信息
+                                st.warning(f"未知的图表数据类型: {type(chart_data)}")
     
     # 数据概览卡片
     st.markdown("""
@@ -748,8 +1364,9 @@ def show_ai_insights_page():
                             'content': question
                         })
                         
-                        # 生成AI回答
-                        ai_response = generate_ai_insight(df, question)
+                        # 显示简化的进度提示
+                        with st.spinner(f"🤖 正在分析：{question[:20]}..."):
+                            ai_response = generate_ai_insight(df, question)
                         
                         # 处理AI响应（可能包含图表数据）
                         if isinstance(ai_response, dict) and 'chart' in ai_response:
@@ -787,24 +1404,62 @@ def show_ai_insights_page():
             'content': user_input
         })
         
-        # 生成AI回答
-        with st.spinner("🤖 AI正在分析中..."):
-            ai_response = generate_ai_insight(df, user_input)
+        # 创建状态容器
+        status_container = st.empty()
+        progress_container = st.empty()
+        
+        # 显示详细的进度状态
+        with status_container.container():
+            st.info("🤖 **AI分析进行中...**")
             
-            # 处理AI响应（可能包含图表数据）
-            if isinstance(ai_response, dict) and 'chart' in ai_response:
-                # 如果响应包含图表数据，分别保存文本和图表
-                st.session_state['chat_history'].append({
-                    'role': 'assistant',
-                    'content': ai_response['text'],
-                    'chart': ai_response['chart']
-                })
-            else:
-                # 普通文本响应
-                st.session_state['chat_history'].append({
-                    'role': 'assistant',
-                    'content': ai_response
-                })
+        with progress_container.container():
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # 模拟进度更新
+            import time
+            status_text.text("📊 正在分析数据结构...")
+            progress_bar.progress(20)
+            time.sleep(0.5)
+            
+            status_text.text("🧠 正在调用AI模型...")
+            progress_bar.progress(40)
+            time.sleep(0.5)
+            
+            status_text.text("📈 正在生成洞察分析...")
+            progress_bar.progress(60)
+            
+        # 生成AI回答
+        ai_response = generate_ai_insight(df, user_input)
+        
+        # 更新进度
+        with progress_container.container():
+            status_text.text("✨ 正在整理分析结果...")
+            progress_bar.progress(80)
+            time.sleep(0.3)
+            
+            status_text.text("🎯 分析完成！")
+            progress_bar.progress(100)
+            time.sleep(0.5)
+        
+        # 清除状态显示
+        status_container.empty()
+        progress_container.empty()
+        
+        # 处理AI响应（可能包含图表数据）
+        if isinstance(ai_response, dict) and 'chart' in ai_response:
+            # 如果响应包含图表数据，分别保存文本和图表
+            st.session_state['chat_history'].append({
+                'role': 'assistant',
+                'content': ai_response['text'],
+                'chart': ai_response['chart']
+            })
+        else:
+            # 普通文本响应
+            st.session_state['chat_history'].append({
+                'role': 'assistant',
+                'content': ai_response
+            })
         
         st.rerun()
 
@@ -831,18 +1486,37 @@ def generate_ai_insight(df, question):
             'chat_history': chat_history
         }
         
-        # 调用后端AI API
+        # 调用后端AI API（增加超时时间到180秒以避免浏览器超时）
         backend_url = "http://localhost:7701/api/ai/chat"
-        response = requests.post(backend_url, json=request_data, timeout=30)
+        response = requests.post(backend_url, json=request_data, timeout=180)
         
         if response.status_code == 200:
             result = response.json()
             
             if result.get('success'):
                 ai_response = result['response']
-                visualization_config = result.get('visualization', {'needed': False})
                 
-                # 如果需要生成图表
+                # 检查是否有图表数据（由图表代理生成）
+                if 'chart' in result:
+                    chart_data = result['chart']
+                    # 如果chart是字符串格式的base64数据，转换为字典格式
+                    if isinstance(chart_data, str):
+                        # 从visualization_config获取图表信息
+                        viz_config = result.get('visualization_config', {})
+                        chart_data = {
+                            'chart_base64': chart_data,
+                            'title': viz_config.get('title', '数据可视化'),
+                            'description': viz_config.get('description', ''),
+                            'chart_type': viz_config.get('chart_type', 'unknown')
+                        }
+                    # 图表代理已经生成了图表，直接返回
+                    return {
+                        'text': ai_response,
+                        'chart': chart_data
+                    }
+                
+                # 如果没有图表但有可视化配置，尝试生成图表
+                visualization_config = result.get('visualization', {'needed': False})
                 if visualization_config.get('needed', False):
                     chart_result = generate_chart_from_config(df, visualization_config)
                     if chart_result:
@@ -858,15 +1532,16 @@ def generate_ai_insight(df, question):
                 
                 return ai_response
             else:
-                # 如果API调用失败，返回错误信息
-                return f"🤖 **AI服务暂时不可用**\n\n{result.get('response', result.get('error', '未知错误'))}\n\n💡 **提示：** 请检查网络连接和API配置。"
+                # 如果API调用失败，返回具体的错误信息
+                error_msg = result.get('response', result.get('error', '未知错误'))
+                return f"🤖 **AI分析失败**\n\n{error_msg}"
         else:
             return f"🤖 **后端服务连接失败**\n\n状态码：{response.status_code}\n\n💡 **提示：** 请确保后端服务正在运行（端口7701）。"
         
     except requests.exceptions.ConnectionError:
         return f"🤖 **无法连接到后端服务**\n\n💡 **提示：** 请确保后端服务正在运行（http://localhost:7701）。"
     except requests.exceptions.Timeout:
-        return f"🤖 **请求超时**\n\n💡 **提示：** AI分析需要一些时间，请稍后重试。"
+        return f"🤖 **请求超时**\n\n💡 **提示：** AI分析请求超时（180秒），这可能是由于：\n- OpenAI API响应较慢\n- 网络连接不稳定\n- 分析的数据量较大\n- 模型处理复杂查询需要更多时间\n\n🔧 **建议解决方案：**\n- 尝试简化您的问题描述\n- 检查网络连接状态\n- 稍后重试或联系管理员\n- 考虑分批处理大量数据"
     except Exception as e:
         return f"❌ AI分析过程中出现错误：{str(e)}\n\n请检查系统配置或稍后重试。"
 
@@ -1056,6 +1731,93 @@ def add_custom_viz_component(name, component_type, config_str, category='custom'
     except json.JSONDecodeError:
         st.error("配置格式错误，请输入有效的JSON格式")
         return False
+
+def save_custom_component(component):
+    """保存自定义组件到持久化存储"""
+    try:
+        import os
+        import json
+        
+        # 创建组件存储目录
+        components_dir = os.path.join(os.path.dirname(__file__), 'custom_components')
+        os.makedirs(components_dir, exist_ok=True)
+        
+        # 保存组件配置文件
+        component_file = os.path.join(components_dir, f"{component['id']}.json")
+        with open(component_file, 'w', encoding='utf-8') as f:
+            json.dump(component, f, ensure_ascii=False, indent=2)
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"保存组件失败: {str(e)}")
+        return False
+
+def delete_custom_component(component_id):
+    """删除自定义组件"""
+    try:
+        import os
+        
+        components_dir = os.path.join(os.path.dirname(__file__), 'custom_components')
+        component_file = os.path.join(components_dir, f"{component_id}.json")
+        
+        if os.path.exists(component_file):
+            os.remove(component_file)
+            return True
+        else:
+            st.warning(f"组件文件不存在: {component_id}")
+            return False
+            
+    except Exception as e:
+        st.error(f"删除组件失败: {str(e)}")
+        return False
+
+def load_custom_components():
+    """加载所有自定义组件"""
+    try:
+        import os
+        import json
+        
+        components = []
+        components_dir = os.path.join(os.path.dirname(__file__), 'custom_components')
+        
+        if os.path.exists(components_dir):
+            for filename in os.listdir(components_dir):
+                if filename.endswith('.json'):
+                    component_file = os.path.join(components_dir, filename)
+                    try:
+                        with open(component_file, 'r', encoding='utf-8') as f:
+                            component = json.load(f)
+                            components.append(component)
+                    except Exception as e:
+                        st.warning(f"加载组件文件失败 {filename}: {str(e)}")
+        
+        return components
+        
+    except Exception as e:
+        st.error(f"加载自定义组件失败: {str(e)}")
+        return []
+
+def export_custom_components():
+    """导出所有自定义组件"""
+    try:
+        import json
+        
+        custom_components = load_custom_components()
+        if custom_components:
+            export_data = {
+                'version': '1.0',
+                'export_time': pd.Timestamp.now().isoformat(),
+                'components': custom_components
+            }
+            return json.dumps(export_data, ensure_ascii=False, indent=2)
+        else:
+            st.warning("没有自定义组件可导出")
+            return None
+            
+    except Exception as e:
+        st.error(f"导出组件失败: {str(e)}")
+        return None
     except Exception as e:
         st.error(f"添加组件失败: {str(e)}")
         return False
@@ -1092,16 +1854,17 @@ def get_chart_recommendations(df):
         numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
         categorical_columns = df.select_dtypes(include=['object', 'category']).columns.tolist()
         
+        # 转换numpy类型为Python原生类型，避免JSON序列化错误
         data_context = {
-            'total_rows': len(df),
-            'total_columns': len(df.columns),
+            'total_rows': int(len(df)),
+            'total_columns': int(len(df.columns)),
             'numeric_columns': numeric_columns,
             'categorical_columns': categorical_columns,
             'column_info': {
                 col: {
                     'type': str(df[col].dtype),
-                    'unique_values': df[col].nunique(),
-                    'null_count': df[col].isnull().sum()
+                    'unique_values': int(df[col].nunique()),
+                    'null_count': int(df[col].isnull().sum())
                 } for col in df.columns
             }
         }
@@ -1117,7 +1880,12 @@ def get_chart_recommendations(df):
         )
         
         if response.status_code == 200:
-            return response.json().get('recommendations', [])
+            result = response.json()
+            if result.get('success', True):
+                return result.get('recommendations', [])
+            else:
+                st.error(f"推荐失败: {result.get('error', '未知错误')}")
+                return None
         else:
             st.error(f"推荐API调用失败: {response.status_code}")
             return None

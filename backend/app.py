@@ -3,10 +3,56 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import pandas as pd
+from dotenv import load_dotenv
+
+# 加载环境变量 - 确保在导入其他模块前加载
+load_dotenv()
+
 from llm_analyzer import LLMAnalyzer
-from visualization import VisualizationGenerator
+import sys
+import os
+import importlib.util
+
+# 直接导入visualization.py文件
+viz_spec = importlib.util.spec_from_file_location("visualization_module", os.path.join(os.path.dirname(__file__), "visualization.py"))
+viz_module = importlib.util.module_from_spec(viz_spec)
+viz_spec.loader.exec_module(viz_module)
+VisualizationGenerator = viz_module.VisualizationGenerator
+from chart_agent import ChartAgent
+import pandas as pd
+import numpy as np
+import time
+import sys
+import os
+
+# 添加可视化适配器路径
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'visualization'))
+from adapters import adapter_manager, get_adapter_info, create_chart_with_adapter, compare_chart_adapters
 
 app = Flask(__name__)
+
+def create_sample_dataframe(data_context):
+    """创建模拟数据框（实际应用中应该从数据源获取）"""
+    # 如果有数据上下文，尝试创建相应的数据框
+    if data_context.get('columns'):
+        columns = data_context['columns']
+        n_rows = 100  # 默认100行
+        
+        data = {}
+        for col in columns:
+            if col in data_context.get('numeric_columns', []):
+                data[col] = np.random.randn(n_rows) * 100  # 放大数值范围
+            else:
+                data[col] = [f'SKU_{i%10}' for i in range(n_rows)]  # 模拟SKU数据
+        
+        return pd.DataFrame(data)
+    else:
+        # 默认示例数据
+        return pd.DataFrame({
+            'x': np.random.randn(100),
+            'y': np.random.randn(100),
+            'category': [f'Cat_{i%3}' for i in range(100)]
+        })
 CORS(app)
 
 # 配置上传文件夹
@@ -27,56 +73,52 @@ def health_check():
 
 @app.route('/api/ai/chat', methods=['POST'])
 def ai_chat():
-    """AI对话接口"""
+    """AI聊天接口"""
+    import time
+    start_time = time.time()
+    
     try:
+        app.logger.info("收到AI聊天请求")
         data = request.get_json()
-        
-        if not data:
-            return jsonify({
-                "success": False,
-                "error": "请求数据为空"
-            }), 400
-        
-        question = data.get('question')
+        question = data.get('question', '')
         data_context = data.get('data_context', {})
         chat_history = data.get('chat_history', [])
         
+        app.logger.info(f"问题: {question[:50]}...")
+        app.logger.info(f"数据上下文: {data_context.get('shape', 'N/A')}")
+        
         if not question:
             return jsonify({
-                "success": False,
-                "error": "问题不能为空"
+                'success': False,
+                'error': '问题不能为空'
             }), 400
         
-        # 初始化LLM分析器
-        analyzer = LLMAnalyzer()
+        # 创建模拟数据框
+        df = create_sample_dataframe(data_context)
+        app.logger.info(f"创建模拟数据框: {df.shape}")
         
-        # 调用AI分析
-        result = analyzer.chat_with_data(
-            user_question=question,
-            data_context=data_context,
-            chat_history=chat_history
-        )
+        # 使用图表代理处理请求
+        chart_agent = ChartAgent()
+        app.logger.info("开始调用图表代理")
+        result = chart_agent.analyze_and_generate_chart(question, df, data_context, chat_history)
         
-        # 检查LLM分析器的返回结果
-        if result.get('success', False):
-            return jsonify({
-                'success': True,
-                'response': result.get('response', ''),
-                'visualization': result.get('visualization', {'needed': False})
-            })
-        else:
-            # 如果分析失败，返回错误信息
-            return jsonify({
-                'success': False,
-                'error': result.get('error', '未知错误'),
-                'response': result.get('response', 'AI分析失败')
-            })
+        end_time = time.time()
+        duration = end_time - start_time
+        app.logger.info(f"AI聊天请求处理完成，总耗时: {duration:.2f}秒")
+        
+        return jsonify(result)
         
     except Exception as e:
+        end_time = time.time()
+        duration = end_time - start_time
+        app.logger.error(f"AI聊天请求处理失败，耗时: {duration:.2f}秒，错误: {str(e)}")
+        import traceback
+        app.logger.error(f"详细错误信息: {traceback.format_exc()}")
+        
         return jsonify({
-            "success": False,
-            "error": str(e),
-            "response": f"AI分析过程中出现错误：{str(e)}"
+            'success': False,
+            'error': str(e),
+            'response': f'处理请求时出现错误: {str(e)}'
         }), 500
 
 @app.route('/api/ai/insights', methods=['POST'])
@@ -343,5 +385,193 @@ def get_chart_recommendations():
             'error': f'获取推荐失败: {str(e)}'
         }), 500
 
+@app.route('/api/multi_lib/adapters', methods=['GET'])
+def get_adapters():
+    """获取可用的可视化适配器列表"""
+    try:
+        adapters = get_adapter_info()
+        return jsonify({
+            'success': True,
+            'adapters': adapters
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'获取适配器列表失败: {str(e)}'
+        }), 500
+
+@app.route('/api/multi_lib/generate_chart', methods=['POST'])
+def generate_multi_lib_chart():
+    """使用指定的可视化库生成图表"""
+    try:
+        data = request.get_json()
+        
+        # 验证必需参数
+        required_fields = ['data', 'chart_type', 'adapter_name']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    'success': False,
+                    'error': f'缺少必需参数: {field}'
+                }), 400
+        
+        df = pd.DataFrame(data['data'])
+        chart_type = data['chart_type']
+        adapter_name = data['adapter_name']
+        chart_config = data.get('config', {})
+        
+        # 使用适配器生成图表
+        result = create_chart_with_adapter(
+            adapter_name=adapter_name,
+            chart_type=chart_type,
+            data=df,
+            config=chart_config
+        )
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'chart_html': result['chart_html'],
+                'performance': result['performance'],
+                'adapter_info': result['adapter_info']
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'多库图表生成失败: {str(e)}'
+        }), 500
+
+@app.route('/api/multi_lib/compare', methods=['POST'])
+def compare_multi_lib_charts():
+    """比较多个可视化库的图表生成性能"""
+    try:
+        data = request.get_json()
+        
+        # 验证必需参数
+        required_fields = ['data', 'chart_type', 'adapters']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    'success': False,
+                    'error': f'缺少必需参数: {field}'
+                }), 400
+        
+        df = pd.DataFrame(data['data'])
+        chart_type = data['chart_type']
+        adapters = data['adapters']  # 适配器名称列表
+        chart_config = data.get('config', {})
+        
+        # 比较多个适配器
+        comparison_result = compare_chart_adapters(
+            adapters=adapters,
+            chart_type=chart_type,
+            data=df,
+            config=chart_config
+        )
+        
+        if comparison_result['success']:
+            return jsonify({
+                'success': True,
+                'results': comparison_result['results'],
+                'summary': comparison_result['summary']
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': comparison_result['error']
+            }), 400
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'多库比较失败: {str(e)}'
+        }), 500
+
+@app.route('/api/multi_lib/performance', methods=['POST'])
+def get_performance_metrics():
+    """获取指定适配器的性能指标"""
+    try:
+        data = request.get_json()
+        
+        adapter_name = data.get('adapter_name')
+        if not adapter_name:
+            return jsonify({
+                'success': False,
+                'error': '缺少适配器名称'
+            }), 400
+        
+        # 获取适配器实例
+        adapter = adapter_manager.get_adapter(adapter_name)
+        if not adapter:
+            return jsonify({
+                'success': False,
+                'error': f'未找到适配器: {adapter_name}'
+            }), 404
+        
+        # 获取性能指标
+        metrics = adapter.get_performance_metrics()
+        
+        return jsonify({
+            'success': True,
+            'adapter_name': adapter_name,
+            'metrics': {
+                'avg_render_time': metrics.avg_render_time,
+                'total_charts_created': metrics.total_charts_created,
+                'avg_file_size': metrics.avg_file_size,
+                'error_count': metrics.error_count,
+                'last_updated': metrics.last_updated.isoformat() if metrics.last_updated else None
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'获取性能指标失败: {str(e)}'
+        }), 500
+
+@app.route('/api/multi_lib/chart_types', methods=['GET'])
+def get_supported_chart_types():
+    """获取所有适配器支持的图表类型"""
+    try:
+        adapter_name = request.args.get('adapter')
+        
+        if adapter_name:
+            # 获取特定适配器支持的图表类型
+            adapter = adapter_manager.get_adapter(adapter_name)
+            if not adapter:
+                return jsonify({
+                    'success': False,
+                    'error': f'未找到适配器: {adapter_name}'
+                }), 404
+            
+            chart_types = adapter.get_supported_chart_types()
+            return jsonify({
+                'success': True,
+                'adapter': adapter_name,
+                'chart_types': chart_types
+            })
+        else:
+            # 获取所有适配器支持的图表类型
+            all_chart_types = {}
+            for name, adapter in adapter_manager.adapters.items():
+                all_chart_types[name] = adapter.get_supported_chart_types()
+            
+            return jsonify({
+                'success': True,
+                'chart_types_by_adapter': all_chart_types
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'获取图表类型失败: {str(e)}'
+        }), 500
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=7701)
+    app.run(debug=False, host='0.0.0.0', port=7701, threaded=True)

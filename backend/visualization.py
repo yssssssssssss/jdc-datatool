@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 import base64
 import io
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 class VisualizationGenerator:
     def __init__(self):
@@ -146,6 +146,93 @@ class VisualizationGenerator:
         plt.close(fig)
         return f"data:image/png;base64,{image_base64}"
     
+    def generate_chart(self, df: pd.DataFrame, config: Dict) -> Optional[str]:
+        """统一的图表生成入口方法"""
+        import logging
+        
+        chart_type = config.get('chart_type')
+        columns = config.get('columns', [])
+        title = config.get('title', '数据图表')
+        
+        if not chart_type or not columns:
+            logging.warning(f"图表配置不完整: chart_type={chart_type}, columns={columns}")
+            return None
+        
+        # 验证列是否存在于数据框中
+        valid_columns = [col for col in columns if col in df.columns]
+        if not valid_columns:
+            logging.warning(f"指定的列不存在于数据框中: {columns}")
+            return None
+        
+        try:
+            if chart_type == 'histogram' and len(valid_columns) >= 1:
+                return self.generate_histogram(df[valid_columns[0]], title)
+                
+            elif chart_type == 'scatter' and len(valid_columns) >= 2:
+                return self.generate_scatter_plot(df[valid_columns[0]], df[valid_columns[1]], title)
+                
+            elif chart_type == 'line' and len(valid_columns) >= 2:
+                return self.generate_line_chart(df, valid_columns[0], valid_columns[1], title)
+                
+            elif chart_type == 'bar' and len(valid_columns) >= 1:
+                # 处理分类数据的分组统计
+                if df[valid_columns[0]].dtype == 'object' or df[valid_columns[0]].dtype.name == 'category':
+                    if len(valid_columns) >= 2 and df[valid_columns[1]].dtype in ['int64', 'float64']:
+                        # 如果有第二列数值数据，计算分组平均值
+                        grouped_data = df.groupby(valid_columns[0])[valid_columns[1]].mean()
+                    else:
+                        # 否则计算计数
+                        grouped_data = df[valid_columns[0]].value_counts()
+                    return self.generate_bar_chart(grouped_data, title)
+                else:
+                    # 对于数值数据，直接使用
+                    return self.generate_bar_chart(df[valid_columns[0]], title)
+                    
+            elif chart_type == 'pie' and len(valid_columns) >= 1:
+                # 饼图需要分类数据或计数数据
+                if df[valid_columns[0]].dtype == 'object' or df[valid_columns[0]].dtype.name == 'category':
+                    pie_data = df[valid_columns[0]].value_counts()
+                else:
+                    # 对于数值数据，创建分组
+                    pie_data = pd.cut(df[valid_columns[0]], bins=5).value_counts()
+                return self.generate_pie_chart(pie_data, title)
+                
+            elif chart_type == 'heatmap':
+                # 热力图需要多个数值列
+                numeric_df = df[valid_columns].select_dtypes(include=['number'])
+                if not numeric_df.empty and len(numeric_df.columns) > 1:
+                    return self.generate_heatmap(numeric_df, title)
+                else:
+                    logging.warning("热力图需要至少2个数值列")
+                    return None
+                    
+            elif chart_type == 'box' and len(valid_columns) >= 1:
+                return self.generate_box_plot(df, valid_columns[0], title)
+                
+            elif chart_type == 'violin' and len(valid_columns) >= 1:
+                # 小提琴图暂时用箱线图替代
+                return self.generate_box_plot(df, valid_columns[0], title)
+                
+            elif chart_type == 'area' and len(valid_columns) >= 2:
+                # 面积图暂时用折线图替代
+                return self.generate_line_chart(df, valid_columns[0], valid_columns[1], title)
+                
+            elif chart_type == 'radar' and len(valid_columns) >= 3:
+                # 雷达图暂时用相关性热力图替代
+                numeric_df = df[valid_columns].select_dtypes(include=['number'])
+                if not numeric_df.empty:
+                    return self.generate_heatmap(numeric_df.corr(), f"{title} - 相关性分析")
+                else:
+                    logging.warning("雷达图需要数值列")
+                    return None
+            else:
+                logging.warning(f"不支持的图表类型或列数不足: {chart_type}, 列数: {len(valid_columns)}")
+                return None
+                
+        except Exception as e:
+            logging.error(f"图表生成失败: {e}, 配置: {config}")
+            return None
+
     def get_chart_suggestions(self, data: pd.DataFrame) -> List[Dict]:
         """根据数据类型推荐图表"""
         suggestions = []

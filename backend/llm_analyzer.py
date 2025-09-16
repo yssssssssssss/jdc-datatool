@@ -49,51 +49,16 @@ class LLMAnalyzer:
 - 数据类型：{data_context.get('dtypes', {})}
 """
             
-            # 构建系统提示
+            # 构建系统提示（极简版本，最大化响应速度）
             system_prompt = f"""
-你是一个专业的数据分析师和可视化专家，擅长分析各种类型的数据并提供深入的洞察和最佳的可视化建议。
+数据分析专家。数据信息：{context_info}
 
-当前数据信息：
-{context_info}
+图表：histogram,scatter,line,bar,pie,heatmap,box,violin
 
-请根据用户的问题，提供专业、准确的数据分析建议，并智能推荐最适合的可视化方案。
+JSON格式：
+{{"analysis":"分析","visualization":{{"needed":true/false,"chart_type":"类型","columns":["列"],"title":"标题","description":"说明","recommendations":["选项"],"insights":"洞察"}}}}
 
-可用的图表类型及其适用场景：
-- histogram: 单变量数值分布分析
-- scatter: 两变量相关性分析
-- line: 时间序列或趋势分析
-- bar: 分类数据比较
-- pie: 占比分析（适用于少量分类）
-- heatmap: 多变量相关性矩阵或二维数据密度
-- box: 数值分布和异常值检测
-- violin: 数据分布形状分析
-- area: 累积趋势分析
-- radar: 多维度特征对比
-
-重要：请以JSON格式返回响应，包含以下字段：
-{{
-  "analysis": "详细的文字分析内容，包含数据洞察和发现",
-  "visualization": {{
-    "needed": true/false,
-    "chart_type": "推荐的最佳图表类型",
-    "columns": ["需要用于可视化的列名"],
-    "title": "具有描述性的图表标题",
-    "description": "图表说明和解读要点",
-    "recommendations": ["其他可选的图表类型"],
-    "insights": "从可视化中可以获得的关键洞察"
-  }}
-}}
-
-图表推荐原则：
-1. 根据数据类型和分析目标选择最合适的图表
-2. 考虑数据的维度和复杂性
-3. 优先推荐能够清晰展示数据特征的图表类型
-4. 为复杂分析提供多种可视化选项
-
-如果问题需要可视化展示，请设置visualization.needed为true并提供详细配置。
-如果只需要文字分析，请设置visualization.needed为false。
-
-请用中文回答，语言要专业但易懂，注重实用性。
+简洁中文回答。
 """
             
             # 构建消息历史
@@ -119,12 +84,23 @@ class LLMAnalyzer:
                 "content": user_question
             })
             
+            # 记录请求开始时间
+            import time
+            start_time = time.time()
+            logging.info(f"开始OpenAI API调用，模型: {self.model}")
+            
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=float(os.getenv('OPENAI_TEMPERATURE', 0.7)),
-                max_tokens=int(os.getenv('OPENAI_MAX_TOKENS', 2000))
+                max_tokens=int(os.getenv('OPENAI_MAX_TOKENS', 800)),  # 增加最大token数
+                timeout=120  # 增加到120秒超时，匹配前端设置
             )
+            
+            # 记录请求完成时间
+            end_time = time.time()
+            duration = end_time - start_time
+            logging.info(f"OpenAI API调用完成，耗时: {duration:.2f}秒")
             
             ai_response = response.choices[0].message.content
             
@@ -167,11 +143,25 @@ class LLMAnalyzer:
             
             
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
             logging.error(f"AI对话失败: {e}")
+            logging.error(f"详细错误信息: {error_details}")
+            
+            # 根据错误类型提供更具体的错误信息
+            if "timeout" in str(e).lower():
+                error_msg = "OpenAI API请求超时，请稍后重试"
+            elif "connection" in str(e).lower():
+                error_msg = "无法连接到OpenAI API，请检查网络连接"
+            elif "api_key" in str(e).lower() or "unauthorized" in str(e).lower():
+                error_msg = "API密钥无效，请检查OpenAI API配置"
+            else:
+                error_msg = f"AI分析过程中出现错误：{str(e)}"
+            
             return {
                 "success": False,
                 "error": str(e),
-                "response": f"AI分析过程中出现错误：{str(e)}\n\n请检查网络连接或API配置。"
+                "response": f"🤖 **{error_msg}**\n\n💡 **提示：** 请检查网络连接或API配置。"
             }
     
     def analyze_data_insights(self, data_summary: Dict) -> Dict:
@@ -207,7 +197,8 @@ class LLMAnalyzer:
                     {"role": "system", "content": "你是一个专业的数据分析师，擅长数据质量评估和洞察分析。"},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7
+                temperature=0.7,
+                timeout=25  # 设置25秒超时
             )
             
             return {
@@ -257,7 +248,8 @@ class LLMAnalyzer:
                     {"role": "system", "content": "你是一个数据可视化和分析专家。"},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.5
+                temperature=0.5,
+                timeout=25  # 设置25秒超时
             )
             
             return {
@@ -296,7 +288,8 @@ class LLMAnalyzer:
                     {"role": "system", "content": "你是一个数据解读专家，擅长从图表中提取业务洞察。"},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.6
+                temperature=0.6,
+                timeout=25  # 设置25秒超时
             )
             
             return response.choices[0].message.content
